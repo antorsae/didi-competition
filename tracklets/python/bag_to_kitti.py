@@ -18,6 +18,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import PyKDL as kd
+import sensor_msgs.point_cloud2 as pc2
+
 
 from bag_topic_def import *
 from bag_utils import *
@@ -78,6 +80,27 @@ def camera2dict(msg, write_results, camera_dict):
         camera_dict["frame_id"].append(msg.header.frame_id)
         camera_dict["filename"].append(write_results['filename'])
 
+def write_lidar(outdir, msg):
+    results = {}
+    lidar_filename = os.path.join(outdir, str(msg.header.stamp.to_nsec()))
+    cloud_gen = pc2.read_points(msg)
+    cloud = []
+    point_count = 0
+    for x, y, z, intensity, ring in cloud_gen:
+        cloud.append([x, y, z, intensity, ring])
+        point_count += 1
+    results['points'] = point_count
+    np.save(lidar_filename, cloud)
+    results['filename'] = lidar_filename
+    return results
+
+
+def lidar2dict(msg, write_results, lidar_dict):
+    lidar_dict["timestamp"].append(msg.header.stamp.to_nsec())
+    if write_results:
+        lidar_dict["points"].append(write_results['points'] if 'points' in write_results else msg.width)
+        lidar_dict["frame_id"].append(msg.header.frame_id)
+        lidar_dict["filename"].append(write_results['filename'])
 
 def gps2dict(msg, gps_dict):
     gps_dict["timestamp"].append(msg.header.stamp.to_nsec())
@@ -152,10 +175,10 @@ def get_obstacle_pos(
     return frame_to_dict(kd.Frame(kd.Rotation(), res))
 
 
-def interpolate_to_camera(camera_df, other_dfs, filter_cols=[]):
+def interpolate_to_target(target_df, other_dfs, filter_cols=[]):
     if not isinstance(other_dfs, list):
         other_dfs = [other_dfs]
-    if not isinstance(camera_df.index, pd.DatetimeIndex):
+    if not isinstance(target_df.index, pd.DatetimeIndex):
         print('Error: Camera dataframe needs to be indexed by timestamp for interpolation')
         return pd.DataFrame()
 
@@ -165,10 +188,10 @@ def interpolate_to_camera(camera_df, other_dfs, filter_cols=[]):
         o.index.rename('index', inplace=True)
 
     merged = functools.reduce(lambda left, right: pd.merge(
-        left, right, how='outer', left_index=True, right_index=True), [camera_df] + other_dfs)
+        left, right, how='outer', left_index=True, right_index=True), [target_df] + other_dfs)
     merged.interpolate(method='time', inplace=True, limit=100, limit_direction='both')
 
-    filtered = merged.loc[camera_df.index]  # back to only camera rows
+    filtered = merged.loc[target_df.index]  # back to only camera rows
     filtered.fillna(0.0, inplace=True)
     filtered['timestamp'] = filtered.index.astype('int')  # add back original timestamp integer col
     if filter_cols:
@@ -218,6 +241,8 @@ def main():
     parser.add_argument('-f', '--img_format', type=str, nargs='?', default='jpg',
         help='Image encode format, png or jpg')
     parser.add_argument('-m', dest='msg_only', action='store_true', help='Messages only, no images')
+    parser.add_argument('-l', dest='include_lidar', action='store_true', help='Include lidar')
+    parser.add_argument('-L', dest='index_by_lidar', action='store_true', help='Index tracklets by lidar frames instead of camera frames')
     parser.add_argument('-d', dest='debug', action='store_true', help='Debug print enable')
     parser.set_defaults(msg_only=False)
     parser.set_defaults(debug=False)
@@ -228,13 +253,15 @@ def main():
     indir = args.indir
     msg_only = args.msg_only
     debug_print = args.debug
-
+    
     bridge = CvBridge()
 
     include_images = False if msg_only else True
+    include_lidar  = args.include_lidar
+    index_by_lidar = args.index_by_lidar
 
     filter_topics = CAMERA_TOPICS + CAP_FRONT_RTK_TOPICS + CAP_REAR_RTK_TOPICS \
-        + CAP_FRONT_GPS_TOPICS + CAP_REAR_GPS_TOPICS
+        + CAP_FRONT_GPS_TOPICS + CAP_REAR_GPS_TOPICS + LIDAR_TOPICS
 
     # For bag sets that may have missing metadata.csv file
     default_metadata = [{
@@ -270,6 +297,9 @@ def main():
         camera_cols = ["timestamp", "width", "height", "frame_id", "filename"]
         camera_dict = defaultdict(list)
 
+        lidar_cols  = ["timestamp", "points", "frame_id", "filename"]
+        lidar_dict  = defaultdict(list)
+
         gps_cols = ["timestamp", "lat", "long", "alt"]
         cap_rear_gps_dict = defaultdict(list)
         cap_front_gps_dict = defaultdict(list)
@@ -285,6 +315,9 @@ def main():
         get_outdir(dataset_outdir)
         if include_images:
             camera_outdir = get_outdir(dataset_outdir, "camera")
+        if include_lidar:
+            lidar_outdir  = get_outdir(dataset_outdir, "lidar")
+
         bs.write_infos(dataset_outdir)
         readers = bs.get_readers()
         stats_acc = defaultdict(int)
@@ -301,6 +334,18 @@ def main():
                     write_results['filename'] = os.path.relpath(write_results['filename'], dataset_outdir)
                 camera2dict(msg, write_results, camera_dict)
                 stats['img_count'] += 1
+                stats['msg_count'] += 1
+
+            elif topic in LIDAR_TOPICS:
+                if debug_print:
+                    print("%s_lidar %d" % (topic[1], timestamp))
+
+                write_results = {}
+                if include_lidar:
+                    write_results = write_lidar(lidar_outdir, msg)
+                    write_results['filename'] = os.path.relpath(write_results['filename'], dataset_outdir)
+                lidar2dict(msg, write_results, lidar_dict)
+                stats['lidar_count'] += 1
                 stats['msg_count'] += 1
 
             elif topic in CAP_REAR_RTK_TOPICS:
@@ -345,6 +390,7 @@ def main():
         sys.stdout.flush()
 
         camera_df = pd.DataFrame(data=camera_dict, columns=camera_cols)
+        lidar_df  = pd.DataFrame(data=lidar_dict,  columns=lidar_cols)
         cap_rear_gps_df = pd.DataFrame(data=cap_rear_gps_dict, columns=gps_cols)
         cap_front_gps_df = pd.DataFrame(data=cap_front_gps_dict, columns=gps_cols)
         cap_rear_rtk_df = pd.DataFrame(data=cap_rear_rtk_dict, columns=rtk_cols)
@@ -360,6 +406,10 @@ def main():
 
         if include_images:
             camera_df.to_csv(os.path.join(dataset_outdir, 'capture_vehicle_camera.csv'), index=False)
+
+        if include_lidar:
+            lidar_df.to_csv(os.path.join(dataset_outdir, 'capture_vehicle_lidar.csv'), index=False)
+
         cap_rear_gps_df.to_csv(os.path.join(dataset_outdir, 'capture_vehicle_rear_gps.csv'), index=False)
         cap_front_gps_df.to_csv(os.path.join(dataset_outdir, 'capture_vehicle_front_gps.csv'), index=False)
         cap_rear_rtk_df.to_csv(os.path.join(dataset_outdir, 'capture_vehicle_rear_rtk.csv'), index=False)
@@ -375,28 +425,35 @@ def main():
             obs_rtk_df.to_csv(os.path.join(dataset_outdir, '%s_rtk.csv' % obs_prefix), index=False)
             obs_rtk_df_dict[obs_topic] = obs_rtk_df
 
-        if len(camera_dict['timestamp']):
-            # Interpolate samples from all used sensors to camera frame timestamps
-            camera_df['timestamp'] = pd.to_datetime(camera_df['timestamp'])
-            camera_df.set_index(['timestamp'], inplace=True)
-            camera_df.index.rename('index', inplace=True)
+        if index_by_lidar:
+            target_dict = lidar_dict
+            target_df   = lidar_df
+        else:
+            target_dict = camera_dict
+            target_df   = camera_df
 
-            camera_index_df = pd.DataFrame(index=camera_df.index)
+        if len(target_dict['timestamp']):
+            # Interpolate samples from all used sensors to index frame timestamps
+            target_df['timestamp'] = pd.to_datetime(target_df['timestamp'])
+            target_df.set_index(['timestamp'], inplace=True)
+            target_df.index.rename('index', inplace=True)
 
-            cap_rear_gps_interp = interpolate_to_camera(camera_index_df, cap_rear_gps_df, filter_cols=gps_cols)
+            target_index_df = pd.DataFrame(index=target_df.index)
+
+            cap_rear_gps_interp = interpolate_to_target(target_index_df, cap_rear_gps_df, filter_cols=gps_cols)
             cap_rear_gps_interp.to_csv(
                 os.path.join(dataset_outdir, 'capture_vehicle_rear_gps_interp.csv'), header=True)
 
-            cap_front_gps_interp = interpolate_to_camera(camera_index_df, cap_front_gps_df, filter_cols=gps_cols)
+            cap_front_gps_interp = interpolate_to_target(target_index_df, cap_front_gps_df, filter_cols=gps_cols)
             cap_front_gps_interp.to_csv(
                 os.path.join(dataset_outdir, 'capture_vehicle_front_gps_interp.csv'), header=True)
 
-            cap_rear_rtk_interp = interpolate_to_camera(camera_index_df, cap_rear_rtk_df, filter_cols=rtk_cols)
+            cap_rear_rtk_interp = interpolate_to_target(target_index_df, cap_rear_rtk_df, filter_cols=rtk_cols)
             cap_rear_rtk_interp.to_csv(
                 os.path.join(dataset_outdir, 'capture_vehicle_rear_rtk_interp.csv'), header=True)
             cap_rear_rtk_interp_rec = cap_rear_rtk_interp.to_dict(orient='records')
 
-            cap_front_rtk_interp = interpolate_to_camera(camera_index_df, cap_front_rtk_df, filter_cols=rtk_cols)
+            cap_front_rtk_interp = interpolate_to_target(target_index_df, cap_front_rtk_df, filter_cols=rtk_cols)
             cap_front_rtk_interp.to_csv(
                 os.path.join(dataset_outdir, 'capture_vehicle_front_rtk_interp.csv'), header=True)
             cap_front_rtk_interp_rec = cap_front_rtk_interp.to_dict(orient='records')
@@ -409,7 +466,7 @@ def main():
             collection = TrackletCollection()
             for obs_topic in obstacle_rtk_dicts.keys():
                 obs_rtk_df = obs_rtk_df_dict[obs_topic]
-                obs_interp = interpolate_to_camera(camera_index_df, obs_rtk_df, filter_cols=rtk_cols)
+                obs_interp = interpolate_to_target(target_index_df, obs_rtk_df, filter_cols=rtk_cols)
                 obs_prefix, obs_name = obs_prefix_from_topic(obs_topic)
                 obs_interp.to_csv(
                     os.path.join(dataset_outdir, '%s_rtk_interpolated.csv' % obs_prefix), header=True)
