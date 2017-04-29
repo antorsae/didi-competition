@@ -26,6 +26,12 @@ from bag_utils import *
 from generate_tracklet import *
 
 
+# Bag message timestamp source
+TS_SRC_PUB = 0
+TS_SRC_REC = 1
+TS_SRC_OBS_REC = 2
+
+
 def get_outdir(base_dir, name=''):
     outdir = os.path.join(base_dir, name)
     if not os.path.exists(outdir):
@@ -72,8 +78,8 @@ def write_image(bridge, outdir, msg, fmt='png'):
     return results
 
 
-def camera2dict(msg, write_results, camera_dict):
-    camera_dict["timestamp"].append(msg.header.stamp.to_nsec())
+def camera2dict(timestamp, msg, write_results, camera_dict):
+    camera_dict["timestamp"].append(timestamp)
     if write_results:
         camera_dict["width"].append(write_results['width'] if 'width' in write_results else msg.width)
         camera_dict['height'].append(write_results['height'] if 'height' in write_results else msg.height)
@@ -102,15 +108,15 @@ def lidar2dict(msg, write_results, lidar_dict):
         lidar_dict["frame_id"].append(msg.header.frame_id)
         lidar_dict["filename"].append(write_results['filename'])
 
-def gps2dict(msg, gps_dict):
-    gps_dict["timestamp"].append(msg.header.stamp.to_nsec())
+def gps2dict(timestamp, msg, gps_dict):
+    gps_dict["timestamp"].append(timestamp)
     gps_dict["lat"].append(msg.latitude)
     gps_dict["long"].append(msg.longitude)
     gps_dict["alt"].append(msg.altitude)
 
 
-def rtk2dict(msg, rtk_dict):
-    rtk_dict["timestamp"].append(msg.header.stamp.to_nsec())
+def rtk2dict(timestamp, msg, rtk_dict):
+    rtk_dict["timestamp"].append(timestamp)
     rtk_dict["tx"].append(msg.pose.pose.position.x)
     rtk_dict["ty"].append(msg.pose.pose.position.y)
     rtk_dict["tz"].append(msg.pose.pose.position.z)
@@ -125,8 +131,8 @@ def rtk2dict(msg, rtk_dict):
     rtk_dict["rz"].append(rot_xyz[2])
 
 
-def imu2dict(msg, imu_dict):
-    imu_dict["timestamp"].append(msg.header.stamp.to_nsec())
+def imu2dict(timestamp, msg, imu_dict):
+    imu_dict["timestamp"].append(timestamp)
     imu_dict["ax"].append(msg.linear_acceleration.x)
     imu_dict["ay"].append(msg.linear_acceleration.y)
     imu_dict["az"].append(msg.linear_acceleration.z)
@@ -240,6 +246,9 @@ def main():
         help='Input folder where bagfiles are located')
     parser.add_argument('-f', '--img_format', type=str, nargs='?', default='jpg',
         help='Image encode format, png or jpg')
+    parser.add_argument('-t', '--ts_src', type=str, nargs='?', default='pub',
+        help="""Timestamp source. 'pub'=capture node publish time, 'rec'=receiver bag record time,
+        'obs_rec'=record time for obstacles topics only, pub for others. Default='pub'""")
     parser.add_argument('-m', dest='msg_only', action='store_true', help='Messages only, no images')
     parser.add_argument('-l', dest='include_lidar', action='store_true', help='Include lidar')
     parser.add_argument('-L', dest='index_by_lidar', action='store_true', help='Index tracklets by lidar frames instead of camera frames')
@@ -251,6 +260,11 @@ def main():
     img_format = args.img_format
     base_outdir = args.outdir
     indir = args.indir
+    ts_src = TS_SRC_PUB
+    if args.ts_src == 'rec':
+        ts_src = TS_SRC_REC
+    elif args.ts_src == 'obs_rec':
+        ts_src = TS_SRC_OBS_REC
     msg_only = args.msg_only
     debug_print = args.debug
     
@@ -322,8 +336,13 @@ def main():
         readers = bs.get_readers()
         stats_acc = defaultdict(int)
 
-        def _process_msg(topic, msg, stats):
-            timestamp = msg.header.stamp.to_nsec()
+        def _process_msg(topic, msg, ts_recorded, stats):
+            timestamp = msg.header.stamp.to_nsec()  # default to publish timestamp in message header
+            if ts_src == TS_SRC_REC:
+                timestamp = ts_recorded.to_nsec()
+            elif ts_src == TS_SRC_OBS_REC and topic in OBSTACLE_RTK_TOPICS:
+                timestamp = ts_recorded.to_nsec()
+
             if topic in CAMERA_TOPICS:
                 if debug_print:
                     print("%s_camera %d" % (topic[1], timestamp))
@@ -332,7 +351,7 @@ def main():
                 if include_images:
                     write_results = write_image(bridge, camera_outdir, msg, fmt=img_format)
                     write_results['filename'] = os.path.relpath(write_results['filename'], dataset_outdir)
-                camera2dict(msg, write_results, camera_dict)
+                camera2dict(timestamp, msg, write_results, camera_dict)
                 stats['img_count'] += 1
                 stats['msg_count'] += 1
 
@@ -349,23 +368,23 @@ def main():
                 stats['msg_count'] += 1
 
             elif topic in CAP_REAR_RTK_TOPICS:
-                rtk2dict(msg, cap_rear_rtk_dict)
+                rtk2dict(timestamp, msg, cap_rear_rtk_dict)
                 stats['msg_count'] += 1
 
             elif topic in CAP_FRONT_RTK_TOPICS:
-                rtk2dict(msg, cap_front_rtk_dict)
+                rtk2dict(timestamp, msg, cap_front_rtk_dict)
                 stats['msg_count'] += 1
 
             elif topic in CAP_REAR_GPS_TOPICS:
-                gps2dict(msg, cap_rear_gps_dict)
+                gps2dict(timestamp, msg, cap_rear_gps_dict)
                 stats['msg_count'] += 1
 
             elif topic in CAP_FRONT_GPS_TOPICS:
-                gps2dict(msg, cap_front_gps_dict)
+                gps2dict(timestamp, msg, cap_front_gps_dict)
                 stats['msg_count'] += 1
 
             elif topic in OBSTACLE_RTK_TOPICS:
-                rtk2dict(msg, obstacle_rtk_dicts[topic])
+                rtk2dict(timestamp, msg, obstacle_rtk_dicts[topic])
                 stats['msg_count'] += 1
 
             else:
