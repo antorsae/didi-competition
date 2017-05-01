@@ -101,8 +101,8 @@ def write_lidar(outdir, msg):
     return results
 
 
-def lidar2dict(msg, write_results, lidar_dict):
-    lidar_dict["timestamp"].append(msg.header.stamp.to_nsec())
+def lidar2dict(timestamp, msg, write_results, lidar_dict):
+    lidar_dict["timestamp"].append(timestamp)
     if write_results:
         lidar_dict["points"].append(write_results['points'] if 'points' in write_results else msg.width)
         lidar_dict["frame_id"].append(msg.header.frame_id)
@@ -159,6 +159,7 @@ def get_obstacle_pos(
         front,
         rear,
         obstacle,
+        obstacle_yaw,
         velodyne_to_front,
         gps_to_centroid):
     front_v = dict_to_vect(front)
@@ -176,9 +177,12 @@ def get_obstacle_pos(
     # the obstacle's yaw. Unfortunately the obstacle's pose is unknown at this
     # point so we will assume obstacle is axis aligned with capture vehicle
     # for now.
-    res += list_to_vect(gps_to_centroid)
 
-    return frame_to_dict(kd.Frame(kd.Rotation(), res))
+    centroid = kd.Rotation.RotZ( obstacle_yaw - yaw ) * list_to_vect(gps_to_centroid)
+
+    res += centroid # list_to_vect(gps_to_centroid)
+
+    return frame_to_dict(kd.Frame(kd.Rotation.RotZ(obstacle_yaw - yaw), res))
 
 
 def interpolate_to_target(target_df, other_dfs, filter_cols=[]):
@@ -215,6 +219,7 @@ def estimate_obstacle_poses(
     #cap_rear_gps_offset,
     obs_rear_rtk,
     obs_rear_gps_offset,  # offset along [l, w, h] dim of car, in obstacle relative coords
+    obs_yaw
 ):
     # offsets are all [l, w, h] lists (or tuples)
     assert(len(obs_rear_gps_offset) == 3)
@@ -222,9 +227,9 @@ def estimate_obstacle_poses(
     assert len(cap_front_rtk) == len(cap_rear_rtk) == len(obs_rear_rtk)
 
     velo_to_front = [-1.0922, 0, -0.0508]
-    rtk_coords = zip(cap_front_rtk, cap_rear_rtk, obs_rear_rtk)
+    rtk_coords = zip(cap_front_rtk, cap_rear_rtk, obs_rear_rtk, obs_yaw)
     output_poses = [
-        get_obstacle_pos(c[0], c[1], c[2], velo_to_front, obs_rear_gps_offset) for c in rtk_coords]
+        get_obstacle_pos(c[0], c[1], c[2], c[3], velo_to_front, obs_rear_gps_offset) for c in rtk_coords]
 
     return output_poses
 
@@ -363,7 +368,7 @@ def main():
                 if include_lidar:
                     write_results = write_lidar(lidar_outdir, msg)
                     write_results['filename'] = os.path.relpath(write_results['filename'], dataset_outdir)
-                lidar2dict(msg, write_results, lidar_dict)
+                lidar2dict(timestamp, msg, write_results, lidar_dict)
                 stats['lidar_count'] += 1
                 stats['msg_count'] += 1
 
@@ -404,8 +409,8 @@ def main():
                     last_msg_log = stats_acc['msg_count']
                     sys.stdout.flush()
 
-        print("Writing done. %d images, %d messages processed." %
-              (stats_acc['img_count'], stats_acc['msg_count']))
+        print("Writing done. %d images, %d lidar frames, %d messages processed." %
+              (stats_acc['img_count'], stats_acc['lidar_count'], stats_acc['msg_count']))
         sys.stdout.flush()
 
         camera_df = pd.DataFrame(data=camera_dict, columns=camera_cols)
@@ -521,6 +526,13 @@ def main():
                 lrg_to_centroid = [mdr['l'] / 2., -mdr['w'] / 2., mdr['h'] / 2.]
                 gps_to_centroid = np.subtract(lrg_to_centroid, lrg_to_gps)
 
+                # compute obstacle yaw based on movement, and fill out missing gaps where obstacle moves too little
+                obs_rear_rtk_diff  = obs_interp.diff()
+                obs_moving  = (obs_rear_rtk_diff.tx ** 2 + obs_rear_rtk_diff.ty ** 2) >= (0.1 ** 2)
+                obs_rear_rtk_diff.loc[~obs_moving, 'tx':'ty'] = None
+                obs_yaw_computed = np.arctan2(obs_rear_rtk_diff['ty'], obs_rear_rtk_diff['tx'])
+                obs_yaw_computed = obs_yaw_computed.fillna(method='bfill').fillna(method='ffill').fillna(value=0.)
+
                 # Convert NED RTK coords of obstacle to capture vehicle body frame relative coordinates
                 obs_tracklet.poses = estimate_obstacle_poses(
                     cap_front_rtk=cap_front_rtk_interp_rec,
@@ -529,6 +541,7 @@ def main():
                     #cap_rear_gps_offset=[0.0, 0.0, 0.0],
                     obs_rear_rtk=obs_interp.to_dict(orient='records'),
                     obs_rear_gps_offset=gps_to_centroid,
+                    obs_yaw = obs_yaw_computed
                 )
 
                 collection.tracklets.append(obs_tracklet)
@@ -537,7 +550,7 @@ def main():
             tracklet_path = os.path.join(dataset_outdir, 'tracklet_labels.xml')
             collection.write_xml(tracklet_path)
         else:
-            print('Warning: No camera image times were found. '
+            print('Warning: No camera/lidar times were found. '
                   'Skipping sensor interpolation and Tracklet generation.')
 
 
