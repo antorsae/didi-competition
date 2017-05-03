@@ -310,6 +310,15 @@ class DidiTracklet(object):
 
         return
 
+    def top_and_side_view(self, frame, with_boxes=True, lidar_override=None, SX=None, abl_overrides=None, zoom_to_box=False):
+        tv = self.top_view(frame, with_boxes=with_boxes, lidar_override=lidar_override,
+                           SX=SX, abl_overrides=abl_overrides, zoom_to_box=zoom_to_box,
+                           remove_ground_plane=True, fine_tune_box = False)
+        sv = self.top_view(frame, with_boxes=with_boxes, lidar_override=lidar_override,
+                           SX=SX, abl_overrides=abl_overrides, zoom_to_box=zoom_to_box,
+                           side_view=True)
+        return np.concatenate((tv, sv), axis=0)
+
     # return a top view of the lidar image for frame
     # draw boxes for tracked objects if with_boxes is True
     #
@@ -317,7 +326,8 @@ class DidiTracklet(object):
     # useful if you want to stack lidar below or above camera image
     #
     # if abl_override is provided it draws
-    def top_view(self, frame, with_boxes=True, lidar_override=None, SX=None, abl_overrides=None, zoom_to_box=False):
+    def top_view(self, frame, with_boxes=True, lidar_override=None, SX=None, abl_overrides=None,
+                 zoom_to_box=False, side_view=False, fine_tune_box=False, remove_ground_plane = False):
 
         if with_boxes and zoom_to_box:
             assert self._boxes is not None
@@ -366,9 +376,68 @@ class DidiTracklet(object):
                 assert frame in self.lidars
             lidar = self.lidars[frame]
 
-        ROTY = False
 
-        if ROTY:
+        if remove_ground_plane:
+
+            import pcl
+            lidar_close = lidar[( ((lidar[:, 0] - cx) ** 2 + (lidar[:, 1] - cy) ** 2) < 7 ** 2) & ((lidar[:, 0] ** 2 + lidar[:, 1] ** 2) >= 3**2)]
+
+            print(lidar_close.shape)
+
+            p = pcl.PointCloud(lidar_close[:,0:3].astype(np.float32))
+            seg = p.make_segmenter()
+            seg.set_optimize_coefficients(True)
+            seg.set_model_type(pcl.SACMODEL_PLANE)
+            seg.set_method_type(pcl.SAC_RANSAC)
+            seg.set_distance_threshold(0.10)
+            indices, model = seg.segment()
+            print(lidar_close.shape[0]-len(indices))
+            gp = np.zeros((lidar_close.shape[0]), dtype=np.bool)
+            gp[indices] = True
+            print(model)
+            lidar = lidar_close[~gp]
+
+            if False:
+                data = lidar[:,0:5]
+                box_dist_2 = box[0,3] ** 2 + box[1,3] ** 2 + box[2,3] ** 2 + (3* 4**2)
+                data = data[(data[:,0] ** 2 + data[:,1] ** 2 + data[:,2] ** 2) > 3**2]
+                data = data[(data[:,0] ** 2 + data[:,1] ** 2 + data[:,2] ** 2) < box_dist_2]
+
+                lidar = data
+                data = data[:,0:3]
+
+                import scipy.linalg
+
+                A = np.c_[data[:, 0], data[:, 1], np.ones(data.shape[0])]
+                C, _, _, _ = scipy.linalg.lstsq(A, data[:, 2])  # coefficients
+
+                plane = data[:,0] * C[0] + data[:,1] * C[1] + C[2]
+                lidar = lidar[np.abs(lidar[:,2] - plane) > 0.2 ]
+                #print(C)
+
+                intensity_hist  = np.histogram(lidar[:,3], bins=20)
+                intensity_max   = np.argmax(intensity_hist[0])
+                intensity_range = (intensity_hist[1][intensity_max], intensity_hist[1][intensity_max+1])
+                lidar_ground_plane = (lidar[:,2] >= intensity_range[0]) & (lidar[:,2] < intensity_range[1])
+                #lidar = lidar[~lidar_ground_plane]
+
+                lidar_offset_z = 0.2413 + 0.09 + 1.27 # see https://github.com/antorsae/didi-competition/blob/master/mkz-description/mkz.urdf.xacro
+                lidar += np.array([[0.,0.,lidar_offset_z, 0., 0.]], dtype=np.float32)
+                lidar_alpha_rho = np.array([np.arctan2(lidar[:, 2], np.sqrt(lidar[:,0]**2+lidar[:,1]**2 )), np.arctan2(lidar[:, 2], np.sqrt(lidar[:,0]**2+lidar[:,1]**2 ))]).T
+                lidar_hist = np.histogramdd(lidar_alpha_rho, bins = 200, range=((-np.pi,np.pi), (-np.pi,np.pi)))
+                angle_idx  = np.unravel_index(np.argmax(lidar_hist[0]), lidar_hist[0].shape)
+                alpha_range = (lidar_hist[1][0][angle_idx[0]], lidar_hist[1][0][angle_idx[0]+1])
+                rho_range   = (lidar_hist[1][1][angle_idx[1]], lidar_hist[1][1][angle_idx[1]+1])
+                lidar_ground_plane = (lidar_alpha_rho[:,0] >= alpha_range[0]) & (lidar_alpha_rho[:,0] < alpha_range[1]) & \
+                    (lidar_alpha_rho[:, 1] >= rho_range[0]) & (lidar_alpha_rho[:, 1] < rho_range[1])
+                #lidar = lidar[~lidar_ground_plane]
+
+
+                #return lidar_hist[0]
+
+
+
+        if side_view:
             lidar = lidar[(lidar[:,1] >= -1.) & (lidar[:,1] <= 1.)]
             rot90X = np.array([[1, 0, 0, 0, 0], [0, 0, -1., 0, 0], [0, 1, 0, 0, 0], [0, 0, 0, 1, 0], [0, 0, 0, 0, 1]], dtype=np.float32)
             lidar  = np.dot(lidar, rot90X)
@@ -400,12 +469,12 @@ class DidiTracklet(object):
             assert self._boxes is not None
             boxes = self._boxes[frame]
             new_boxes = []
-            if ROTY:
+            if side_view:
                 for box in boxes:
                     new_boxes.append(np.dot(box.T, rot90X[0:3, 0:3]).T)
             else:
                 new_boxes = boxes
-            if ROTY:
+            if side_view:
                 order = [0,2,6,4]
             else:
                 order = [0,1,2,3]
@@ -419,11 +488,41 @@ class DidiTracklet(object):
 
                 cv2.polylines(top_view, [np.int32((a, b, c, d)).reshape((-1, 1, 2))], True, (1., 0., 0.), thickness=1)
 
-                lidar_in_box = self._lidar_in_box(frame, box)
+                lidar_in_box  = self._lidar_in_box(frame, box)
                 for point in lidar_in_box:
                     x, y = point[0], point[1]
                     if inRange(x, y):
                         top_view[toXY(x, y)[::-1]] = (0., 1., 1.)
+
+                if fine_tune_box:
+
+                    if True:
+                        centroid     = np.array([np.average(box[0,:]), np.average(box[1,:]), 0.])
+                        lidar_close  = lidar[( (lidar[:,0] - centroid[0]) ** 2 + (lidar[:,1] - centroid[1]) ** 2 ) < 5**2]
+                        new_centroid = np.array([np.average(lidar_close[:,0]), np.average(lidar_close[:,1]), 0.])
+                        max_box      = box + (new_centroid - centroid).T.reshape(-1,1)
+
+                    else:
+                        max_points_in_box = lidar_in_box.shape[0]
+                        max_box = box
+                        for x_search in np.linspace(-1., 1., num=20):
+                            for y_search in np.linspace(-1, 1., num=20):
+                                offset = np.array([x_search, y_search, 0.], dtype=np.float32)
+                                offset = np.expand_dims(offset, axis=0)
+                                test_box = box + offset.T
+                                _points_in_box = self._lidar_in_box(frame, test_box, ignore_z=True)
+                                points_in_box = _points_in_box.shape[0]
+                                if points_in_box > max_points_in_box:
+                                    max_points_in_box = points_in_box
+                                    max_box = test_box
+
+                    if max_box is not box:
+                        a = np.array([toXY(max_box[0, order[0]], max_box[1, order[0]])])
+                        b = np.array([toXY(max_box[0, order[1]], max_box[1, order[1]])])
+                        c = np.array([toXY(max_box[0, order[2]], max_box[1, order[2]])])
+                        d = np.array([toXY(max_box[0, order[3]], max_box[1, order[3]])])
+
+                        cv2.polylines(top_view, [np.int32((a, b, c, d)).reshape((-1, 1, 2))], True, (0., 1., 0.), thickness=1)
 
         if abl_overrides is not None:
             color = np.array([1., 0., 0.])
@@ -478,16 +577,16 @@ class DidiTracklet(object):
         return lidar_in_2d_box
 
     # returns lidar points that are inside a given box, or just the indexes
-    def _lidar_in_box(self, frame, box):
+    def _lidar_in_box(self, frame, box, ignore_z=False):
         if frame not in self.lidars:
             self._read_lidar(frame)
             assert frame in self.lidars
 
         lidar = self.lidars[frame]
-        return self.__lidar_in_box(lidar, box)
+        return self.__lidar_in_box(lidar, box, ignore_z=ignore_z)
 
     # returns lidar points that are inside a given box, or just the indexes
-    def __lidar_in_box(self, lidar, box, return_idx_only=False):
+    def __lidar_in_box(self, lidar, box, return_idx_only=False, ignore_z=False):
 
         p = lidar[:, 0:3]
 
@@ -504,10 +603,16 @@ class DidiTracklet(object):
 
         amab = np.squeeze(np.dot(np.array([p[:, 0] - a[0], p[:, 1] - a[1]]).T, ab.reshape(-1, 2).T))
         amad = np.squeeze(np.dot(np.array([p[:, 0] - a[0], p[:, 1] - a[1]]).T, ad.reshape(-1, 2).T))
-        h = np.array([box[2, 0], box[2, 4]])
 
-        in_box_idx = np.where(
-            (abab >= amab) & (amab >= 0.) & (amad >= 0.) & (adad >= amad) & (p[:, 2] >= h[0]) & (p[:, 2] <= h[1]))
+        if ignore_z:
+            in_box_idx = np.where(
+                (abab >= amab) & (amab >= 0.) & (amad >= 0.) & (adad >= amad))
+        else:
+            min_z = box[2, 0]
+            max_z = box[2, 4]
+            in_box_idx = np.where(
+                (abab >= amab) & (amab >= 0.) & (amad >= 0.) & (adad >= amad) & (p[:, 2] >= min_z) & (p[:, 2] <= max_z))
+
         if return_idx_only:
             return in_box_idx
 

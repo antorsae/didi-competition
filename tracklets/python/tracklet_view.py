@@ -5,6 +5,8 @@ import sys
 import re
 from diditracklet import *
 import pyqtgraph as pg
+from pyqtgraph.Qt import QtGui, QtCore
+
 
 def find_tracklets(
         directory,
@@ -28,16 +30,35 @@ def find_tracklets(
 
 if __name__ == '__main__':
 
-    im = pg.image(title="Loading")
+    app = QtGui.QApplication([])
+
+    ## Define a top-level widget to hold everything
+    w = QtGui.QWidget()
+
+    ## Create some widgets to be placed inside
+
+    tv_button  = QtGui.QPushButton('Toggle View')
+    im         = pg.image(title="Loading")
+
+    ## Create a grid layout to manage the widgets size and position
+    layout = QtGui.QGridLayout()
+    w.setLayout(layout)
+
+    ## Add widgets to the layout in their proper positions
+    layout.addWidget(tv_button, 0, 0)  # button goes in upper-left
+    layout.addWidget(im, 1, 0)  # plot goes on right side, spanning 3 rows
+
+    def toggle_view():
+        Thread.side_view = True if Thread.side_view == False else False
 
     def update(data):
         (tv, title) = data
         im.setImage(tv)
         im.win.setWindowTitle(title)
 
-
     class Thread(pg.QtCore.QThread):
         new_image = pg.QtCore.Signal(object)
+        side_view = True
 
         def run(self):
             parser = argparse.ArgumentParser(description='View tracklets.')
@@ -52,7 +73,7 @@ if __name__ == '__main__':
             for tracklet in diditracklets:
                 tvv = None
                 for frame in tracklet.frames():
-                    tv  = tracklet.top_view(frame, with_boxes=True, zoom_to_box=True, SX=400)
+                    tv = tracklet.top_and_side_view(frame, with_boxes=True, zoom_to_box=True, SX=400)
                     if tvv is None:
                         tvv = np.expand_dims(tv, axis=0)
                     else:
@@ -60,9 +81,17 @@ if __name__ == '__main__':
                 self.new_image.emit((tvv, tracklet.date + "/" + tracklet.drive + ".bag"))
             print("Finished!")
 
+
+    w.show()
+    tv_button.clicked.connect(toggle_view)
+
     thread = Thread()
     thread.new_image.connect(update)
     thread.start()
+
+
+
+
 
     import sys
 
