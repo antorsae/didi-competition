@@ -313,10 +313,10 @@ class DidiTracklet(object):
     def top_and_side_view(self, frame, with_boxes=True, lidar_override=None, SX=None, abl_overrides=None, zoom_to_box=False):
         tv = self.top_view(frame, with_boxes=with_boxes, lidar_override=lidar_override,
                            SX=SX, abl_overrides=abl_overrides, zoom_to_box=zoom_to_box,
-                           remove_ground_plane=True, fine_tune_box = False)
+                           remove_ground_plane=True, fine_tune_box = False, remove_points_below_plane = True)
         sv = self.top_view(frame, with_boxes=with_boxes, lidar_override=lidar_override,
                            SX=SX, abl_overrides=abl_overrides, zoom_to_box=zoom_to_box,
-                           side_view=True)
+                           side_view=True, remove_points_below_plane = True)
         return np.concatenate((tv, sv), axis=0)
 
     # return a top view of the lidar image for frame
@@ -327,7 +327,7 @@ class DidiTracklet(object):
     #
     # if abl_override is provided it draws
     def top_view(self, frame, with_boxes=True, lidar_override=None, SX=None, abl_overrides=None,
-                 zoom_to_box=False, side_view=False, fine_tune_box=False, remove_ground_plane = False):
+                 zoom_to_box=False, side_view=False, fine_tune_box=False, remove_ground_plane = False, remove_points_below_plane =  False):
 
         if with_boxes and zoom_to_box:
             assert self._boxes is not None
@@ -389,7 +389,7 @@ class DidiTracklet(object):
             seg.set_optimize_coefficients(True)
             seg.set_model_type(pcl.SACMODEL_PLANE)
             seg.set_method_type(pcl.SAC_RANSAC)
-            seg.set_distance_threshold(0.10)
+            seg.set_distance_threshold(0.1)
             indices, model = seg.segment()
             print(lidar_close.shape[0]-len(indices))
             gp = np.zeros((lidar_close.shape[0]), dtype=np.bool)
@@ -397,45 +397,20 @@ class DidiTracklet(object):
             print(model)
             lidar = lidar_close[~gp]
 
-            if False:
-                data = lidar[:,0:5]
-                box_dist_2 = box[0,3] ** 2 + box[1,3] ** 2 + box[2,3] ** 2 + (3* 4**2)
-                data = data[(data[:,0] ** 2 + data[:,1] ** 2 + data[:,2] ** 2) > 3**2]
-                data = data[(data[:,0] ** 2 + data[:,1] ** 2 + data[:,2] ** 2) < box_dist_2]
-
-                lidar = data
-                data = data[:,0:3]
-
-                import scipy.linalg
-
-                A = np.c_[data[:, 0], data[:, 1], np.ones(data.shape[0])]
-                C, _, _, _ = scipy.linalg.lstsq(A, data[:, 2])  # coefficients
-
-                plane = data[:,0] * C[0] + data[:,1] * C[1] + C[2]
-                lidar = lidar[np.abs(lidar[:,2] - plane) > 0.2 ]
-                #print(C)
-
-                intensity_hist  = np.histogram(lidar[:,3], bins=20)
-                intensity_max   = np.argmax(intensity_hist[0])
-                intensity_range = (intensity_hist[1][intensity_max], intensity_hist[1][intensity_max+1])
-                lidar_ground_plane = (lidar[:,2] >= intensity_range[0]) & (lidar[:,2] < intensity_range[1])
-                #lidar = lidar[~lidar_ground_plane]
-
-                lidar_offset_z = 0.2413 + 0.09 + 1.27 # see https://github.com/antorsae/didi-competition/blob/master/mkz-description/mkz.urdf.xacro
-                lidar += np.array([[0.,0.,lidar_offset_z, 0., 0.]], dtype=np.float32)
-                lidar_alpha_rho = np.array([np.arctan2(lidar[:, 2], np.sqrt(lidar[:,0]**2+lidar[:,1]**2 )), np.arctan2(lidar[:, 2], np.sqrt(lidar[:,0]**2+lidar[:,1]**2 ))]).T
-                lidar_hist = np.histogramdd(lidar_alpha_rho, bins = 200, range=((-np.pi,np.pi), (-np.pi,np.pi)))
-                angle_idx  = np.unravel_index(np.argmax(lidar_hist[0]), lidar_hist[0].shape)
-                alpha_range = (lidar_hist[1][0][angle_idx[0]], lidar_hist[1][0][angle_idx[0]+1])
-                rho_range   = (lidar_hist[1][1][angle_idx[1]], lidar_hist[1][1][angle_idx[1]+1])
-                lidar_ground_plane = (lidar_alpha_rho[:,0] >= alpha_range[0]) & (lidar_alpha_rho[:,0] < alpha_range[1]) & \
-                    (lidar_alpha_rho[:, 1] >= rho_range[0]) & (lidar_alpha_rho[:, 1] < rho_range[1])
-                #lidar = lidar[~lidar_ground_plane]
-
-
-                #return lidar_hist[0]
-
-
+            if remove_points_below_plane and  (len(lidar) >1 ) and (len(model)== 4):
+                print(model)
+                a = model[0]
+                b = model[1]
+                c = model[2]
+                d = model[3]
+                dd = np.sqrt(a**2 + b**2 +  c**2)
+                print("before removing")
+                print(lidar.shape)
+                # see http://mathworld.wolfram.com/HessianNormalForm.html
+                # we can remove / dd because we're just interested in the sign
+                lidar = lidar[( lidar[:, 0]* a + lidar[:,1] * b + lidar[:,2] * c  + d)  >= 0  ]
+                print("after removing")
+                print(lidar.shape)
 
         if side_view:
             lidar = lidar[(lidar[:,1] >= -1.) & (lidar[:,1] <= 1.)]
