@@ -7,6 +7,8 @@ import parse_tracklet as tracklets
 import didipykitti as pykitti
 from collections import defaultdict
 import cv2
+import point_utils
+from scipy.linalg import expm3, norm
 
 M = 10
 MIN_HEIGHT = -2.  # from camera (i.e.  -2-1.65 =  3.65m above floor)
@@ -52,12 +54,49 @@ class DidiTracklet(object):
         # boxes is a dict indexed by frame:  e.g. boxes[10] = [box, box, ...]
         self._boxes = None  # defaultdict(list)
 
+        reference_file = os.path.join(basedir, date, 'obs.txt')
+        if os.path.isfile(reference_file):
+            self.reference = self.__load_reference(reference_file)
+        else:
+            self.reference = None
+
+    def __load_reference(self, reference_file):
+        reference = np.genfromtxt(reference_file, dtype=np.float32, comments='/')
+        reference = np.multiply(reference, np.array([0.0254, 0.0254, 0.0254, 1, 1, 1]))
+        reference_min = np.amin(reference[:, 0:3], axis=0)
+        reference_lwh = np.amax(reference[:, 0:3], axis=0) - reference_min
+
+        reference[:, 0:3] -= (reference_min[0:3] + reference_lwh[0:3] / 2.)
+
+        reference[:, 0:3] = point_utils.rotate(reference[:,0:3], np.array([1., 0., 0.]), np.pi / 2)
+
+        reference[:, 2] = -reference[:, 2]
+        reference[:, 2] -= (np.amin(reference[:, 2]))
+        return reference
+
+    def align(self, first):
+        if self.reference is not None:
+            T, _ = point_utils.icp(first, self.reference[:, 0:3])
+            t    =  T[0:3, 3].T
+        else:
+            t    = np.zeros((3))
+        return t
+
     # for DIDI -> don't filter anything
     # for KITTI ->
     # include tracklet IFF in image and not occluded
     # WARNING: There's a lot of tracklets with occs=-1 (255) which we need to fix
     def __include_tracklet(self, t, idx):
         return True # (t.truncs[idx] == tracklets.Truncation.IN_IMAGE) and (t.occs[idx, 0] == 0)
+
+    def _get_yaw(self, frame):
+        assert len(self.tracklet_data) == 1 # only one tracklet supported for now!
+        for t in self.tracklet_data:
+            assert frame in range(t.first_frame, t.first_frame + t.num_frames)
+            idx = frame - t.first_frame
+            yaw = t.rots[idx][2]
+        return yaw
+
 
     # return list of frames with tracked objects of type only_with
     def frames(self, only_with=None):
@@ -248,58 +287,6 @@ class DidiTracklet(object):
             return lidar_cones, image
         return lidar_cones
 
-    def lidar_with_label(self, frame, MAX_POINTS=None):
-        if frame not in self.lidars:
-            self._read_lidar(frame)
-            assert frame in self.lidars
-        lidar = self.lidars[frame]
-        lidar, lidar_o = self.__project(lidar, return_projection=False, return_velo_in_img=True,
-                                        return_velo_outside_img=True)
-        if self.LIDAR_ANGLE is not None:
-            lidar_o = lidar_o[np.arctan2(lidar_o[:, 0], np.absolute(lidar_o[:, 1])) >= self.LIDAR_ANGLE]
-        lidar = np.concatenate((lidar, lidar_o), axis=0)
-
-        if (MAX_POINTS is not None) and (MAX_POINTS < lidar.shape[0]):
-            lidar = self._lidar_subsample(lidar, MAX_POINTS)
-
-        _lidar_with_label = np.empty((lidar.shape[0], 5))
-        _lidar_with_label[:, 0:4] = lidar[:, :]
-        _lidar_with_label[:, 4] = 0
-
-        assert self._boxes is not None
-        for box in self._boxes[frame]:
-            idx = self.__lidar_in_box(_lidar_with_label, box, return_idx_only=True)
-            _lidar_with_label[idx, 4] = 1
-
-        return _lidar_with_label
-
-    # returns lidar points with associated label into (Nx5 array)
-    # defaults to MAX_POINTS if not provided
-    def lidar_with_label(self, frame, MAX_POINTS=None):
-        if frame not in self.lidars:
-            self._read_lidar(frame)
-            assert frame in self.lidars
-        lidar = self.lidars[frame]
-        lidar, lidar_o = self.__project(lidar, return_projection=False, return_velo_in_img=True,
-                                        return_velo_outside_img=True)
-        if self.LIDAR_ANGLE is not None:
-            lidar_o = lidar_o[np.arctan2(lidar_o[:, 0], np.absolute(lidar_o[:, 1])) >= self.LIDAR_ANGLE]
-        lidar = np.concatenate((lidar, lidar_o), axis=0)
-
-        if (MAX_POINTS is not None) and (MAX_POINTS < lidar.shape[0]):
-            lidar = self._lidar_subsample(lidar, MAX_POINTS)
-
-        _lidar_with_label = np.empty((lidar.shape[0], 5))
-        _lidar_with_label[:, 0:4] = lidar[:, :]
-        _lidar_with_label[:, 4] = 0
-
-        assert self._boxes is not None
-        for box in self._boxes[frame]:
-            idx = self.__lidar_in_box(_lidar_with_label, box, return_idx_only=True)
-            _lidar_with_label[idx, 4] = 1
-
-        return _lidar_with_label
-
     def side_view(self, frame, with_boxes = True):
         if frame not in self.lidars:
             self._read_lidar(frame)
@@ -313,10 +300,10 @@ class DidiTracklet(object):
     def top_and_side_view(self, frame, with_boxes=True, lidar_override=None, SX=None, abl_overrides=None, zoom_to_box=False):
         tv = self.top_view(frame, with_boxes=with_boxes, lidar_override=lidar_override,
                            SX=SX, abl_overrides=abl_overrides, zoom_to_box=zoom_to_box,
-                           remove_ground_plane=True, fine_tune_box = False, remove_points_below_plane = True)
+                           remove_ground_plane=True, fine_tune_box = True, remove_points_below_plane = True)
         sv = self.top_view(frame, with_boxes=with_boxes, lidar_override=lidar_override,
                            SX=SX, abl_overrides=abl_overrides, zoom_to_box=zoom_to_box,
-                           side_view=True, remove_points_below_plane = True)
+                           side_view=True, remove_points_below_plane = False)
         return np.concatenate((tv, sv), axis=0)
 
     # return a top view of the lidar image for frame
@@ -329,6 +316,7 @@ class DidiTracklet(object):
     def top_view(self, frame, with_boxes=True, lidar_override=None, SX=None, abl_overrides=None,
                  zoom_to_box=False, side_view=False, fine_tune_box=False, remove_ground_plane = False, remove_points_below_plane =  False):
 
+        print(frame)
         if with_boxes and zoom_to_box:
             assert self._boxes is not None
             box = self._boxes[frame][0] # first box for now
@@ -377,40 +365,54 @@ class DidiTracklet(object):
             lidar = self.lidars[frame]
 
 
+        t_box = np.zeros((3))
         if remove_ground_plane:
 
             import pcl
-            lidar_close = lidar[( ((lidar[:, 0] - cx) ** 2 + (lidar[:, 1] - cy) ** 2) < 7 ** 2) & ((lidar[:, 0] ** 2 + lidar[:, 1] ** 2) >= 3**2)]
 
-            print(lidar_close.shape)
+            # get points close to the obstacle (7m) removing capture car (3m) just in case
+            # this will be handy when we find the ground plane around the obstacle later
+            lidar_close = lidar[( ((lidar[:, 0] - cx) ** 2 + (lidar[:, 1] - cy) ** 2) < 4 ** 2) & ((lidar[:, 0] ** 2 + lidar[:, 1] ** 2) >= 3**2)]
 
-            p = pcl.PointCloud(lidar_close[:,0:3].astype(np.float32))
-            seg = p.make_segmenter()
-            seg.set_optimize_coefficients(True)
-            seg.set_model_type(pcl.SACMODEL_PLANE)
-            seg.set_method_type(pcl.SAC_RANSAC)
-            seg.set_distance_threshold(0.1)
-            indices, model = seg.segment()
-            print(lidar_close.shape[0]-len(indices))
-            gp = np.zeros((lidar_close.shape[0]), dtype=np.bool)
-            gp[indices] = True
-            print(model)
-            lidar = lidar_close[~gp]
+            # at a minimum we need 4 points (3 ground plane points plus 1 obstacle point)
+            if (lidar_close.shape[0] >= 4):
 
-            if remove_points_below_plane and  (len(lidar) >1 ) and (len(model)== 4):
-                print(model)
-                a = model[0]
-                b = model[1]
-                c = model[2]
-                d = model[3]
-                dd = np.sqrt(a**2 + b**2 +  c**2)
-                print("before removing")
-                print(lidar.shape)
-                # see http://mathworld.wolfram.com/HessianNormalForm.html
-                # we can remove / dd because we're just interested in the sign
-                lidar = lidar[( lidar[:, 0]* a + lidar[:,1] * b + lidar[:,2] * c  + d)  >= 0  ]
-                print("after removing")
-                print(lidar.shape)
+                p = pcl.PointCloud(lidar_close[:,0:3].astype(np.float32))
+                seg = p.make_segmenter()
+                seg.set_optimize_coefficients(True)
+                seg.set_model_type(pcl.SACMODEL_PLANE)
+                seg.set_method_type(pcl.SAC_RANSAC)
+                seg.set_distance_threshold(0.25)
+                indices, model = seg.segment()
+                gp = np.zeros((lidar_close.shape[0]), dtype=np.bool)
+                gp[indices] = True
+                lidar = lidar_close[~gp]
+
+                a, b, c, d = model
+                if remove_points_below_plane and  (len(lidar) > 1 ) and (len(model)== 4):
+
+                    # see http://mathworld.wolfram.com/HessianNormalForm.html
+                    # we can remove / dd because we're just interested in the sign
+                    # dd = np.sqrt(a ** 2 + b ** 2 + c ** 2)
+                    lidar = lidar[( lidar[:, 0]* a + lidar[:,1] * b + lidar[:,2] * c  + d)  >= 0  ]
+
+                ground_z = (-d - a * cx - b * cy) / c
+                print(cx,cy,ground_z)
+
+                if side_view is False and (lidar.shape[0] > 4):
+
+                    # obs_isolated is just lidar points centered around 0,0 and sitting on ground 0 (z=0)
+                    origin = np.array([cx,cy,ground_z])
+                    obs_isolated = lidar[:,0:3]-origin
+                    # rotate it so that it is aligned with our reference target
+                    obs_isolated = point_utils.rotate(obs_isolated, np.array([0., 0., 1.]), self._get_yaw(frame))
+
+                    np.save(str(frame), obs_isolated)
+                    t_box = point_utils.rotate(self.align(obs_isolated), np.array([0., 0., 1.]), +self._get_yaw(frame))
+
+                    #np.save(str(frame), lidar[:,0:3]-origin )
+
+
 
         if side_view:
             lidar = lidar[(lidar[:,1] >= -1.) & (lidar[:,1] <= 1.)]
@@ -471,25 +473,7 @@ class DidiTracklet(object):
 
                 if fine_tune_box:
 
-                    if True:
-                        centroid     = np.array([np.average(box[0,:]), np.average(box[1,:]), 0.])
-                        lidar_close  = lidar[( (lidar[:,0] - centroid[0]) ** 2 + (lidar[:,1] - centroid[1]) ** 2 ) < 5**2]
-                        new_centroid = np.array([np.average(lidar_close[:,0]), np.average(lidar_close[:,1]), 0.])
-                        max_box      = box + (new_centroid - centroid).T.reshape(-1,1)
-
-                    else:
-                        max_points_in_box = lidar_in_box.shape[0]
-                        max_box = box
-                        for x_search in np.linspace(-1., 1., num=20):
-                            for y_search in np.linspace(-1, 1., num=20):
-                                offset = np.array([x_search, y_search, 0.], dtype=np.float32)
-                                offset = np.expand_dims(offset, axis=0)
-                                test_box = box + offset.T
-                                _points_in_box = self._lidar_in_box(frame, test_box, ignore_z=True)
-                                points_in_box = _points_in_box.shape[0]
-                                if points_in_box > max_points_in_box:
-                                    max_points_in_box = points_in_box
-                                    max_box = test_box
+                    max_box = box - np.expand_dims(t_box, axis=1)
 
                     if max_box is not box:
                         a = np.array([toXY(max_box[0, order[0]], max_box[1, order[0]])])
