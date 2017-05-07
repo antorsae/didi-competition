@@ -72,7 +72,9 @@ if __name__ == '__main__':
 
             for tracklet in diditracklets:
                 tvv = None
+
                 for frame in tracklet.frames():
+
                     tv = tracklet.top_and_side_view(frame, with_boxes=True, zoom_to_box=True, SX=400)
                     if tvv is None:
                         tvv = np.expand_dims(tv, axis=0)

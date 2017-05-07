@@ -239,63 +239,35 @@ class DidiTracklet(object):
                 i += v
         return subsampled
 
-    # For each detected object in frame, returns list of
-    # - lidar_in_2d_bbox (MAX_POINTS, 3)
-    # - label of object
-    # - bbox 6 -> (Ax, Ay, Bx, By, l, h)
-    def lidar_cone_of_detected_objects(self, frame, return_image=False):
+    def get_lidar(self, frame, num_points = None):
         if frame not in self.lidars:
             self._read_lidar(frame)
             assert frame in self.lidars
         lidar = self.lidars[frame]
+        if num_points is not None:
+            lidar_size = lidar.shape[0]
+            if num_points > lidar_size:
+                lidar = np.concatenate((lidar, np.random.choice(lidar, size=num_points - lidar_size, replace=True)), axis=0)
+            elif num_points < lidar_size:
+                lidar = self._lidar_subsample(lidar, num_points)
+        return lidar
 
-        if return_image:
-            if frame not in self.images:
-                self._read_image(frame)
-                assert frame in self.images
-            image = self.images[frame]
-
+    def get_box_centroid(self, frame):
         assert self._boxes is not None
+        assert len(self._boxes[frame]) == 1
+        box = self._boxes[frame][0] # first box for now
+        return np.average(box, axis=1)
 
-        lidar_cones = []
-        for box in self._boxes[frame]:
-            lidar_in_2d_bbox = self.__lidar_in_2d_box(lidar, box)
-
-            # we'll pass two lower points A and B, and l and h (that defines the bounding box in 3d)
-            A = np.array([box[0, 0], box[1, 0]])
-            B = np.array([box[0, 1], box[1, 1]])
-            C = np.array([box[0, 3], box[1, 3]])
-            l = np.linalg.norm(C - B)
-            h = np.array([box[2, 4] - box[2, 0]])
-            # import code
-            # code.interact(local=locals())
-            bbox = np.concatenate((A, B, [l], h), axis=0)
-            lidar_cones.append((lidar_in_2d_bbox, bbox, Parser.kitti_cat_idxs[0]))  # TODO: deal with categories
-
-            if return_image:
-                bbox_l, bbox_h = self.__box_to_2d_box(box)
-                _bbox_l = (int(bbox_l[0]), int(bbox_l[1]))  # todo ROUND result
-                _bbox_h = (int(bbox_h[0]), int(bbox_h[1]))
-                image = cv2.rectangle(image, _bbox_l, _bbox_h, (1., 1., 1.))
-                print(lidar_in_2d_bbox.shape[0], "found in", bbox_l, bbox_h)
-
-        if return_image:
-            top_view = self.top_view(frame, with_boxes=True, SX=image.shape[1])
-            image = np.concatenate((image, top_view), axis=0)
-
-        if return_image:
-            return lidar_cones, image
-        return lidar_cones
-
-    def side_view(self, frame, with_boxes = True):
+    def get_number_of_points_in_box(self, frame, ignore_z=True):
         if frame not in self.lidars:
             self._read_lidar(frame)
             assert frame in self.lidars
+        assert self._boxes is not None
+        assert len(self._boxes[frame]) == 1
+        box = self._boxes[frame][0] # first box for now
         lidar = self.lidars[frame]
+        return len(self.__lidar_in_box(lidar, box, ignore_z=ignore_z))
 
-        side_lidar = lidar[(lidar[1]) < 10. & (lidar[1] > -10.)]
-
-        return
 
     def top_and_side_view(self, frame, with_boxes=True, lidar_override=None, SX=None, abl_overrides=None, zoom_to_box=False):
         tv = self.top_view(frame, with_boxes=with_boxes, lidar_override=lidar_override,
