@@ -1,7 +1,9 @@
 import numpy as np
 from scipy.linalg import expm3, norm
+import scipy.optimize
 from scipy.spatial.distance import cdist
 
+Z_SEARCH_SLICE = 0.02
 
 def M(axis, theta):
     return expm3(np.cross(np.eye(3), axis / norm(axis) * theta))
@@ -75,68 +77,32 @@ def nearest_neighbor(src, dst):
     distances = np.empty(src.shape[0], dtype=np.float32)
     indices   = np.empty(src.shape[0], dtype=np.int32)
 
+    # TODO: Optimize this grouping points in z clusters
     for i, p in enumerate(src):
         z = p[2]
-        dst_i = np.flatnonzero((dst[:,2] >= (z-0.02)) & (dst[:,2] <= (z+0.02)))
+        # only search within horizontal slices 2*Z_SEARCH_SLICE cm from the z plane
+        dst_i = np.flatnonzero((dst[:,2] >= (z-Z_SEARCH_SLICE)) & (dst[:,2] <= (z+Z_SEARCH_SLICE)))
         dst_f = dst[dst_i]
         all_dists = cdist([p], dst_f, 'euclidean')
         index = all_dists.argmin(axis=1)
         distances[i] = all_dists[np.arange(all_dists.shape[0]), index]
         indices[i]   = dst_i[index]
 
-
-    #all_dists = cdist(src, dst, 'euclidean')
-    #indices = all_dists.argmin(axis=1)
-    #distances = all_dists[np.arange(all_dists.shape[0]), indices]
     return distances, indices
 
+def norm_nearest_neighbor(t, src, dst):
+    _t = np.empty(3)
+    _t[:2] = t
+    _t[2]  = 0
+    distances, _ = nearest_neighbor(_t + src, dst)
+    return np.sum(distances) / src.shape[0]
 
 def icp(A, B, init_pose=None, max_iterations=10000, tolerance=0.0001):
-    '''
-    The Iterative Closest Point method
-    Input:
-        A: Nx3 numpy array of source 3D points
-        B: Nx3 numpy array of destination 3D point
-        init_pose: 4x4 homogeneous transformation
-        max_iterations: exit algorithm after max_iterations
-        tolerance: convergence criteria
-    Output:
-        T: final homogeneous transformation
-        distances: Euclidean distances (errors) of the nearest neighbor
-    '''
-
-    # make points homogeneous, copy them so as to maintain the originals
-    src = np.ones((3, A.shape[0]))
-    dst = np.ones((3, B.shape[0]))
-    src[0:3, :] = np.copy(A.T)
-    dst[0:3, :] = np.copy(B.T)
-
-    # apply the initial pose estimation
-    if init_pose is not None:
-        src = np.dot(init_pose, src)
-
-    prev_error = 0
-
-    for i in range(max_iterations):
-        # find the nearest neighbours between the current source and destination points
-        distances, indices = nearest_neighbor(src[0:3, :].T, dst[0:3, :].T)
-
-        # compute the transformation between the current source and nearest destination points
-        t = best_fit_transform(src[0:3, :].T, dst[0:3, indices].T)
-
-        # update the current source
-        src += np.expand_dims(t, axis=1) ##np.dot(T, src)
-
-        # check error
-        mean_error = np.sum(distances) / distances.size
-        if abs(prev_error - mean_error) < tolerance:
-            print("yeah", mean_error)
-            break
-        prev_error = mean_error
-
-    # calculate final transformation
-    t = best_fit_transform(A, src[0:3, :].T)
-
+    result = scipy.optimize.minimize(norm_nearest_neighbor, np.array([0.,0.]), args=(A, B), method='Powell', options = {'disp' : True})
+    t = np.empty(3)
+    t[:2] = result.x
+    t[2]  = 0
+    distances, _ = nearest_neighbor(t + A, B)
     return t, distances
 
 class ICP(object):
@@ -182,36 +148,65 @@ def ransac(first, reference, model_class, min_samples, threshold, max_trials=100
         best model returned by model_class.fit, best inlier indices
     '''
 
+    min_reference_z =  np.amin(reference[:,2])
+    max_reference_z =  np.amax(reference[:,2])
+
+    # keep points that have a matching slices in the reference object
+    first = first[(first[:,2] > (min_reference_z - Z_SEARCH_SLICE)) & (first[:,2] < (max_reference_z + Z_SEARCH_SLICE))]
+
     best_model = None
     best_inlier_num = 0
     best_inliers = None
     best_model_inliers_residua = 1e100
+    second_best_model = None
+    second_best_inlier_num = 0
+    second_best_inliers = None
+    second_best_model_inliers_residua = 1e100
+
+
     first_idx = np.arange(first.shape[0])
     import scipy.cluster.hierarchy
     Z = scipy.cluster.hierarchy.linkage(first, 'ward')
     max_d = 3
     clusters = scipy.cluster.hierarchy.fcluster(Z, max_d, criterion='distance')
     unique_clusters = np.unique(clusters)
-    print("Unique clusters:", unique_clusters)
-    #for _ in xrange(max_trials):
+    print("Unique clusters: " + str(len(unique_clusters)))
     for cluster in unique_clusters:
+        print("Trying cluster " + str(cluster))
         sample_idx = np.where(clusters==cluster)
         sample  = first[sample_idx]
-        #sample = first[np.random.randint(0, first.shape[0], np.random.randint(2,min_samples))]
         if model_class.is_degenerate(sample):
             continue
-        sample_model = model_class.fit(sample, reference)
-        sample_model_residua = model_class.residuals(sample_model, first, reference)
-        sample_model_inliers = first_idx[sample_model_residua<threshold]
-        inlier_num = sample_model_inliers.shape[0]
-        print("Inliers:", inlier_num)
-        sample_model_inliers_residua = np.sum(sample_model_residua[sample_model_residua<threshold]) / inlier_num
-        if (inlier_num >= min_samples) and (sample_model_inliers_residua < best_model_inliers_residua):
-            best_inlier_num = inlier_num
-            best_inliers    = sample_model_inliers
-            best_model      = sample_model
-            best_model_inliers_residua = sample_model_inliers_residua
-        print(sample_model_residua)
+        while True:
+            sample_model = model_class.fit(sample, reference)
+            sample_model_residua = model_class.residuals(sample_model, first, reference)
+            sample_model_inliers = first_idx[sample_model_residua<threshold]
+            inlier_num = sample_model_inliers.shape[0]
+            print("Inliers:", inlier_num)
+            sample_model_inliers_residua = np.sum(sample_model_residua[sample_model_residua<threshold]) / inlier_num
+            if (inlier_num >= min_samples) and (sample_model_inliers_residua < best_model_inliers_residua):
+                best_inlier_num = inlier_num
+                best_inliers    = sample_model_inliers
+                best_model      = sample_model
+                best_model_inliers_residua = sample_model_inliers_residua
+            elif (inlier_num >= second_best_inlier_num) and (sample_model_inliers_residua < second_best_model_inliers_residua):
+                second_best_inlier_num = inlier_num
+                second_best_inliers    = sample_model_inliers
+                second_best_model      = sample_model
+                second_best_model_inliers_residua = sample_model_inliers_residua
+
+
+            # keep searching if there's enough inliers and there's other inliers than those
+            # used to fit the model
+            if (inlier_num < min_samples) or np.all(np.in1d(sample_model_inliers, sample_idx)):
+                break
+            else:
+                sample_idx = sample_model_inliers
+                sample = first[sample_idx]
     #if best_inliers is not None:
     #    best_model = model_class.fit(first[best_inliers], reference)
-    return best_model, best_inliers
+    if best_model is not None:
+        return best_model, best_inliers
+    else:
+        return second_best_model, second_best_inliers
+

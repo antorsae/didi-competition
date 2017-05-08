@@ -76,8 +76,14 @@ class DidiTracklet(object):
 
     def align(self, first):
         if self.reference is not None:
-            T, _ = point_utils.icp(first, self.reference[:, 0:3])
-            t    =  T[0:3, 3].T
+
+            model = point_utils.ICP()
+            first = point_utils.rotate(first, np.array([0., 0., 1.]), np.pi)
+
+            t, _ = point_utils.ransac(first, self.reference[:, 0:3], model,
+                                            min_samples=int(first.shape[0] * 0.6),
+                                            threshold=0.2)
+
         else:
             t    = np.zeros((3))
         return t
@@ -344,7 +350,7 @@ class DidiTracklet(object):
 
             # get points close to the obstacle (7m) removing capture car (3m) just in case
             # this will be handy when we find the ground plane around the obstacle later
-            lidar_close = lidar[( ((lidar[:, 0] - cx) ** 2 + (lidar[:, 1] - cy) ** 2) < 4 ** 2) & ((lidar[:, 0] ** 2 + lidar[:, 1] ** 2) >= 3**2)]
+            lidar_close = lidar[( ((lidar[:, 0] - cx) ** 2 + (lidar[:, 1] - cy) ** 2) < 7 ** 2) & ((lidar[:, 0] ** 2 + lidar[:, 1] ** 2) >= 3**2)]
 
             # at a minimum we need 4 points (3 ground plane points plus 1 obstacle point)
             if (lidar_close.shape[0] >= 4):
@@ -376,11 +382,31 @@ class DidiTracklet(object):
                     # obs_isolated is just lidar points centered around 0,0 and sitting on ground 0 (z=0)
                     origin = np.array([cx,cy,ground_z])
                     obs_isolated = lidar[:,0:3]-origin
+
+                    d = np.sqrt(a ** 2 + b ** 2 + c ** 2)
+                    nx = a / d
+                    ny = b / d
+                    nz = c / d
+                    roll = np.arctan2(nx, nz)
+                    pitch  = np.arctan2(ny, nz)
+                    print("ground roll",  roll  * 180. / np.pi)
+                    print("ground pitch", pitch * 180. / np.pi)
+
                     # rotate it so that it is aligned with our reference target
                     obs_isolated = point_utils.rotate(obs_isolated, np.array([0., 0., 1.]), self._get_yaw(frame))
+                    # correct ground pitch and roll
+                    print("z min before correction", np.amin(obs_isolated[:,2]))
+
+                    obs_isolated = point_utils.rotate(obs_isolated, np.array([1., 0., 0.]), -roll)
+                    obs_isolated = point_utils.rotate(obs_isolated, np.array([0., 1., 0.]), -pitch)
+                    print("z min after correction", np.amin(obs_isolated[:,2]))
+
+                    # remove stuff beyond 4 meters
+                    #obs_isolated = obs_isolated[(obs_isolated[:, 0] ** 2 + obs_isolated[:, 1] ** 2) <= 4 ** 2]
 
                     np.save(str(frame), obs_isolated)
-                    t_box = point_utils.rotate(self.align(obs_isolated), np.array([0., 0., 1.]), +self._get_yaw(frame))
+                    if fine_tune_box:
+                        t_box = point_utils.rotate(self.align(obs_isolated), np.array([0., 0., 1.]), - self._get_yaw(frame))
 
                     #np.save(str(frame), lidar[:,0:3]-origin )
 
