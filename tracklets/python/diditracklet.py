@@ -82,7 +82,7 @@ class DidiTracklet(object):
 
             t, _ = point_utils.ransac(first, self.reference[:, 0:3], model,
                                             min_samples=int(first.shape[0] * 0.6),
-                                            threshold=0.2)
+                                            threshold=0.3)
 
         else:
             t    = np.zeros((3))
@@ -401,11 +401,16 @@ class DidiTracklet(object):
                     obs_isolated = point_utils.rotate(obs_isolated, np.array([0., 1., 0.]), -pitch)
                     print("z min after correction", np.amin(obs_isolated[:,2]))
 
-                    # remove stuff beyond 4 meters
-                    #obs_isolated = obs_isolated[(obs_isolated[:, 0] ** 2 + obs_isolated[:, 1] ** 2) <= 4 ** 2]
+                    # remove stuff beyond 4 meters of the current centroid
+                    obs_cx = 0 #np.mean(obs_isolated[:,0])
+                    obs_cy = 0 #np.mean(obs_isolated[:,1])
+
+                    obs_isolated = obs_isolated[((obs_isolated[:, 0] - obs_cx)** 2 + (obs_isolated[:, 1] - obs_cy) ** 2) <= 4 ** 2]
 
                     np.save(str(frame), obs_isolated)
-                    if fine_tune_box:
+                    np.savetxt(str(frame)+".txt", obs_isolated)
+
+                    if fine_tune_box and (obs_isolated.shape[0] > 0):
                         t_box = point_utils.rotate(self.align(obs_isolated), np.array([0., 0., 1.]), - self._get_yaw(frame))
 
                     #np.save(str(frame), lidar[:,0:3]-origin )
@@ -471,7 +476,7 @@ class DidiTracklet(object):
 
                 if fine_tune_box:
 
-                    max_box = box - np.expand_dims(t_box, axis=1)
+                    max_box = box + np.expand_dims(t_box, axis=1)
 
                     if max_box is not box:
                         a = np.array([toXY(max_box[0, order[0]], max_box[1, order[0]])])

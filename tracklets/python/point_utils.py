@@ -78,15 +78,21 @@ def nearest_neighbor(src, dst):
     indices   = np.empty(src.shape[0], dtype=np.int32)
 
     # TODO: Optimize this grouping points in z clusters
-    for i, p in enumerate(src):
-        z = p[2]
-        # only search within horizontal slices 2*Z_SEARCH_SLICE cm from the z plane
+
+    pending_points  = np.array(src)
+
+    while pending_points.shape[0] > 0:
+        z = pending_points[0,2]
+        points_in_slice         = np.flatnonzero((src[:,2] > (z-Z_SEARCH_SLICE/2.)) & (src[:,2] < (z+Z_SEARCH_SLICE/2.)))
+        pending_points_in_slice = (pending_points[:,2] > (z-Z_SEARCH_SLICE/2.)) & (pending_points[:,2] < (z+Z_SEARCH_SLICE/2.))
+        src_slice  = pending_points[pending_points_in_slice]
         dst_i = np.flatnonzero((dst[:,2] >= (z-Z_SEARCH_SLICE)) & (dst[:,2] <= (z+Z_SEARCH_SLICE)))
         dst_f = dst[dst_i]
-        all_dists = cdist([p], dst_f, 'euclidean')
+        all_dists = cdist(src_slice, dst_f, 'euclidean')
         index = all_dists.argmin(axis=1)
-        distances[i] = all_dists[np.arange(all_dists.shape[0]), index]
-        indices[i]   = dst_i[index]
+        distances[points_in_slice] = all_dists[np.arange(all_dists.shape[0]), index]
+        indices[points_in_slice]   = dst_i[index]
+        pending_points  = pending_points[~pending_points_in_slice]
 
     return distances, indices
 
@@ -98,7 +104,7 @@ def norm_nearest_neighbor(t, src, dst):
     return np.sum(distances) / src.shape[0]
 
 def icp(A, B, init_pose=None, max_iterations=10000, tolerance=0.0001):
-    result = scipy.optimize.minimize(norm_nearest_neighbor, np.array([0.,0.]), args=(A, B), method='Powell', options = {'disp' : True})
+    result = scipy.optimize.minimize(norm_nearest_neighbor, np.array([0.,0.]), args=(A, B), method='Powell')
     t = np.empty(3)
     t[:2] = result.x
     t[2]  = 0
@@ -125,7 +131,7 @@ class ICP(object):
     def is_degenerate(self, sample):
         return False
 
-def ransac(first, reference, model_class, min_samples, threshold, max_trials=1000):
+def ransac(first, reference, model_class, min_samples, threshold):
     '''
     Fits a model to data with the RANSAC algorithm.
     :param data: numpy.ndarray
@@ -151,8 +157,14 @@ def ransac(first, reference, model_class, min_samples, threshold, max_trials=100
     min_reference_z =  np.amin(reference[:,2])
     max_reference_z =  np.amax(reference[:,2])
 
+    first_points = first.shape[0]
+
     # keep points that have a matching slices in the reference object
     first = first[(first[:,2] > (min_reference_z - Z_SEARCH_SLICE)) & (first[:,2] < (max_reference_z + Z_SEARCH_SLICE))]
+
+    if first_points != first.shape[0]:
+        print("Removed " + str(first_points - first.shape[0]) + " points due to Z cropping")
+
 
     best_model = None
     best_inlier_num = 0
@@ -162,6 +174,7 @@ def ransac(first, reference, model_class, min_samples, threshold, max_trials=100
     second_best_inlier_num = 0
     second_best_inliers = None
     second_best_model_inliers_residua = 1e100
+    second_best_score = 0
 
 
     first_idx = np.arange(first.shape[0])
@@ -170,31 +183,33 @@ def ransac(first, reference, model_class, min_samples, threshold, max_trials=100
     max_d = 3
     clusters = scipy.cluster.hierarchy.fcluster(Z, max_d, criterion='distance')
     unique_clusters = np.unique(clusters)
-    print("Unique clusters: " + str(len(unique_clusters)))
     for cluster in unique_clusters:
-        print("Trying cluster " + str(cluster))
         sample_idx = np.where(clusters==cluster)
         sample  = first[sample_idx]
+        print("Trying cluster " + str(cluster) +  " / " + str(len(unique_clusters)) + " with " + str(sample_idx[0].shape[0]) + " points")
+
         if model_class.is_degenerate(sample):
             continue
-        while True:
+
+        max_attempts = 10
+        while max_attempts > 0:
             sample_model = model_class.fit(sample, reference)
             sample_model_residua = model_class.residuals(sample_model, first, reference)
             sample_model_inliers = first_idx[sample_model_residua<threshold]
             inlier_num = sample_model_inliers.shape[0]
-            print("Inliers:", inlier_num)
+            print("Inliers: " + str(inlier_num) + " / " + str(first_points))
             sample_model_inliers_residua = np.sum(sample_model_residua[sample_model_residua<threshold]) / inlier_num
             if (inlier_num >= min_samples) and (sample_model_inliers_residua < best_model_inliers_residua):
                 best_inlier_num = inlier_num
                 best_inliers    = sample_model_inliers
                 best_model      = sample_model
                 best_model_inliers_residua = sample_model_inliers_residua
-            elif (inlier_num >= second_best_inlier_num) and (sample_model_inliers_residua < second_best_model_inliers_residua):
+            elif (inlier_num  / sample_model_inliers_residua) > second_best_score: #(inlier_num >= second_best_inlier_num) and (sample_model_inliers_residua < second_best_model_inliers_residua):
+                second_best_score      = inlier_num  / sample_model_inliers_residua
                 second_best_inlier_num = inlier_num
                 second_best_inliers    = sample_model_inliers
                 second_best_model      = sample_model
                 second_best_model_inliers_residua = sample_model_inliers_residua
-
 
             # keep searching if there's enough inliers and there's other inliers than those
             # used to fit the model
@@ -203,10 +218,14 @@ def ransac(first, reference, model_class, min_samples, threshold, max_trials=100
             else:
                 sample_idx = sample_model_inliers
                 sample = first[sample_idx]
-    #if best_inliers is not None:
-    #    best_model = model_class.fit(first[best_inliers], reference)
+            max_attempts -= 1
+
     if best_model is not None:
-        return best_model, best_inliers
+        model, inliers, inlier_num, residua  = best_model, best_inliers, best_inlier_num, best_model_inliers_residua
     else:
-        return second_best_model, second_best_inliers
+        model, inliers, inlier_num, residua =  second_best_model, second_best_inliers, second_best_inlier_num, second_best_model_inliers_residua
+
+    print("Selected " + str(inlier_num) + " / " + str(first_points) + " inliers with " +  str(residua) + " residua")
+
+    return model,inliers
 
