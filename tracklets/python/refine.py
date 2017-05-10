@@ -5,6 +5,7 @@ from pyqtgraph.Qt import QtCore, QtGui
 import pyqtgraph.opengl as gl
 import point_utils
 from diditracklet import *
+from generate_tracklet import *
 
 parser = argparse.ArgumentParser(description='Find point cloud translations')
 parser.add_argument('-1', '--first', type=int, action='store', help='Do one frame only, e.g. -1 87 (does frame 87)')
@@ -19,18 +20,39 @@ parser.add_argument('-y', '--yaw', type=float, nargs='?', default=0.,
                     help='Force initial yaw correction (e.g. -y 0.88)')
 
 args = parser.parse_args()
-search_yaw =  args.search_yaw
+#search_yaw =  args.search_yaw
 
 diditracklets = find_tracklets(args.indir, filter=args.filter, yaw_correction=args.yaw)
 
 for tracklet in diditracklets:
 
-    frames = tracklet.frames if args.first is None else [args.first]
+    print("Refining " + tracklet.xml_path)
+    print("")
+    frames = tracklet.frames() if args.first is None else [args.first]
 
+    t_boxes = []
     for frame in frames:
         print("Frame: " + str(frame) + " / " + str(len(frames)))
-        tv = tracklet.refine_box(frame)
+        t_box = tracklet.refine_box(frame)
+        t_boxes.append(t_box)
         print("")
+
+    # WRITING TRACKLET
+    collection = TrackletCollection()
+    l, w, h = tracklet.get_box_size()
+    obs_tracklet = Tracklet(object_type='Car', l=l,w=w,h=h, first_frame=tracklet.get_box_first_frame())
+
+    for frame, t_box in zip(frames, t_boxes):
+        pose = tracklet.get_box_pose(frame)
+        pose['tx'] += t_box[0]
+        pose['ty'] += t_box[1]
+        pose['tz'] += t_box[2]
+        obs_tracklet.poses.append(pose)
+    collection.tracklets.append(obs_tracklet)
+        # end for obs_topic loop
+
+    tracklet_path = os.path.join(tracklet.xml_path , 'tracklet_labels-out.xml')
+    collection.write_xml(tracklet_path)
 
 '''
 app = QtGui.QApplication([])

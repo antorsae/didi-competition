@@ -66,7 +66,8 @@ class DidiTracklet(object):
 
         self.kitti_data = pykitti.raw(basedir, date, drive,
                                       range(0, 1))  # , range(start_frame, start_frame + total_frames))
-        self.tracklet_data = tracklets.parse_xml(os.path.join(basedir, date, drive, xml_filename))
+        self.xml_path = os.path.join(basedir, date, drive)
+        self.tracklet_data = tracklets.parse_xml(os.path.join(self.xml_path, xml_filename))
 
         # correct yaw in all frames if yaw_correction provided
         if yaw_correction is not 0.:
@@ -158,6 +159,26 @@ class DidiTracklet(object):
             yaw = t.rots[idx][2]
         return yaw
 
+    def get_box_first_frame(self, box=0):
+        assert len(self.tracklet_data) == 1 # only one tracklet supported for now!
+        return self.tracklet_data[box].first_frame
+
+    def get_box_size(self, box=0):
+        assert len(self.tracklet_data) == 1 # only one tracklet supported for now!
+        return self.tracklet_data[box].size
+
+    def get_box_TR(self, frame, box=0):
+        assert len(self.tracklet_data) == 1 # only one tracklet supported for now!
+        t = self.tracklet_data[box]
+        assert frame in range(t.first_frame, t.first_frame + t.num_frames)
+        idx = frame - t.first_frame
+        T,R = t.trans[idx], t.rots[idx]
+        return T,R
+
+    def get_box_pose(self, frame, box=0):
+        T,R = self.get_box_TR(frame, box=box)
+        pose = {'tx': T[0], 'ty': T[1], 'tz': T[2], 'rx': R[0], 'ry': R[1], 'rz': R[2] }
+        return pose
 
     # return list of frames with tracked objects of type only_with
     def frames(self, only_with=None):
@@ -214,7 +235,7 @@ class DidiTracklet(object):
 
     # initialize self.boxes with a dict containing frame -> [box, box, ...]
     def _init_boxes(self, only_with):
-        assert self._boxes is None
+        #assert self._boxes is None
         self._boxes = defaultdict(list)
         for t in self.tracklet_data:
             if (only_with is None) or (t.object_type in only_with):
@@ -345,6 +366,7 @@ class DidiTracklet(object):
         box = self._boxes[frame][0]  # first box for now
         cx = np.average(box[0, :])
         cy = np.average(box[1, :])
+        cz = np.average(box[2, :])
         t_box = np.zeros((3))
 
         if frame not in self.lidars:
@@ -415,10 +437,14 @@ class DidiTracklet(object):
 
                 obs_isolated = obs_isolated[((obs_isolated[:, 0] - obs_cx)** 2 + (obs_isolated[:, 1] - obs_cy) ** 2) <= 4 ** 2]
 
-
                 if (obs_isolated.shape[0] > 0):
                     t_box = point_utils.rotate(self._align(obs_isolated), np.array([0., 0., 1.]), - self._get_yaw(frame))
+
+            new_ground_z = (-d - a * (cx+t_box[0]) - b * (cy+t_box[1])) / c
+            t_box[2] = new_ground_z + self.tracklet_data[0].size[2]/2. - cz
+
         print(t_box)
+
         return t_box
 
 
