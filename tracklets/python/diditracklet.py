@@ -9,6 +9,10 @@ from collections import defaultdict
 import cv2
 import point_utils
 from scipy.linalg import expm3, norm
+import pcl
+import os
+import sys
+import re
 
 M = 10
 MIN_HEIGHT = -2.  # from camera (i.e.  -2-1.65 =  3.65m above floor)
@@ -27,6 +31,27 @@ CAMERA_FEATURES = (375, 1242, 3)
 HEIGHT_FEATURES = (int((MAX_Z - MIN_Z) / HEIGHT_F_RES), int((MAX_X - MIN_X) / HEIGHT_F_RES), M + 2)
 F_VIEW_FEATURES = (C_H, C_W, 3)
 
+def find_tracklets(
+        directory,
+        filter=None,
+        yaw_correction=0.,
+        pattern="tracklet_labels.xml"):
+    diditracklets = []
+    combined_filter = "(" + ")|(".join(filter) + "$)" if filter is not None else None
+    if combined_filter is not None:
+        combined_filter = combined_filter.replace("*", ".*")
+
+    for root, dirs, files in os.walk(directory):
+        for date in dirs:  # 1 2 3
+            for _root, drives, files in os.walk(os.path.join(root, date)):  # ./1/ ./18/ ...
+                for drive in drives:
+                    if os.path.isfile(os.path.join(_root, drive, pattern)):
+                        if filter is None or re.match(combined_filter, date + '/' + drive):
+                            diditracklet = DidiTracklet(root, date, drive, yaw_correction=yaw_correction)
+                            diditracklets.append(diditracklet)
+
+    return diditracklets
+
 
 class DidiTracklet(object):
     kitti_cat_names = ['Car', 'Van', 'Truck', 'Pedestrian', 'Sitter', 'Cyclist', 'Tram', 'Misc', 'Person (sitting)']
@@ -34,14 +59,23 @@ class DidiTracklet(object):
 
     LIDAR_ANGLE = np.pi / 6.
 
-    def __init__(self, basedir, date, drive):
+    def __init__(self, basedir, date, drive, yaw_correction=0., xml_filename="tracklet_labels.xml"):
         self.basedir = basedir
         self.date    = date
         self.drive   = drive
 
         self.kitti_data = pykitti.raw(basedir, date, drive,
                                       range(0, 1))  # , range(start_frame, start_frame + total_frames))
-        self.tracklet_data = tracklets.parse_xml(os.path.join(basedir, date, drive, "tracklet_labels.xml"))
+        self.tracklet_data = tracklets.parse_xml(os.path.join(basedir, date, drive, xml_filename))
+
+        # correct yaw in all frames if yaw_correction provided
+        if yaw_correction is not 0.:
+            assert len(self.tracklet_data) == 1  # only one tracklet supported for now!
+            for t in self.tracklet_data:
+                for frame_offset in range(t.first_frame, t.first_frame + t.num_frames):
+                    idx = frame_offset - t.first_frame
+                    t.rots[idx][2] +=  yaw_correction
+
         self.kitti_data.load_calib()  # Calibration data are accessible as named tuples
 
         # lidars is a dict indexed by frame: e.g. lidars[10] = np(N,4)
@@ -56,25 +90,43 @@ class DidiTracklet(object):
 
         reference_file = os.path.join(basedir, date, 'obs.txt')
         if os.path.isfile(reference_file):
-            self.reference = self.__load_reference(reference_file)
+            flip = True if os.path.isfile(os.path.join(basedir, date, drive, 'flip-reference')) else False
+            if flip:
+                print("Flipping")
+            else:
+                print("Not flipping")
+            self.reference = self.__load_reference(reference_file, flip)
         else:
             self.reference = None
 
-    def __load_reference(self, reference_file):
+        self._init_boxes(only_with=None)
+
+
+    def __load_reference(self, reference_file, flip=False):
         reference = np.genfromtxt(reference_file, dtype=np.float32, comments='/')
-        reference = np.multiply(reference, np.array([0.0254, 0.0254, 0.0254, 1, 1, 1]))
+
+        # our reference model is in inches: convert to meters
+        reference = np.multiply(reference[:, 0:3], np.array([0.0254, 0.0254, 0.0254]))
+
+        if flip:
+            reference = point_utils.rotate(reference, np.array([0.,0.,1.]), np.pi)
+
         reference_min = np.amin(reference[:, 0:3], axis=0)
         reference_lwh = np.amax(reference[:, 0:3], axis=0) - reference_min
 
         reference[:, 0:3] -= (reference_min[0:3] + reference_lwh[0:3] / 2.)
 
+        # our reference model is rotated: align it correctly
         reference[:, 0:3] = point_utils.rotate(reference[:,0:3], np.array([1., 0., 0.]), np.pi / 2)
 
+        # flip it
         reference[:, 2] = -reference[:, 2]
         reference[:, 2] -= (np.amin(reference[:, 2]))
+
+        # at this point our reference model is on lidar frame, centered around x=0,y=0 and sitting at z = 0
         return reference
 
-    def align(self, first):
+    def _align(self, first):
         if self.reference is not None:
 
             model = point_utils.ICP()
@@ -83,6 +135,9 @@ class DidiTracklet(object):
             t, _ = point_utils.ransac(first, self.reference[:, 0:3], model,
                                             min_samples=int(first.shape[0] * 0.6),
                                             threshold=0.3)
+
+            if t is None:
+                t =  np.zeros((3))
 
         else:
             t    = np.zeros((3))
@@ -284,6 +339,89 @@ class DidiTracklet(object):
                            side_view=True, remove_points_below_plane = False)
         return np.concatenate((tv, sv), axis=0)
 
+
+    def refine_box(self, frame, remove_points_below_plane =  True):
+        assert self._boxes is not None
+        box = self._boxes[frame][0]  # first box for now
+        cx = np.average(box[0, :])
+        cy = np.average(box[1, :])
+        t_box = np.zeros((3))
+
+        if frame not in self.lidars:
+            self._read_lidar(frame)
+            assert frame in self.lidars
+        lidar = self.lidars[frame]
+
+        lidar_without_capture = lidar[~ ((np.abs(lidar[:, 0]) < 2.6) & (np.abs(lidar[:, 1]) < 1.))]
+
+        # get points close to the obstacle (d_range meters) removing capture car (2.6m x, 1m y) just in case
+        # this will be handy when we find the ground plane around the obstacle later
+        d_range = 10.
+        lidar_close = lidar_without_capture[( ((lidar_without_capture[:, 0] - cx) ** 2 + (lidar_without_capture[:, 1] - cy) ** 2) < d_range ** 2) ]
+
+        # at a minimum we need 4 points (3 ground plane points plus 1 obstacle point)
+        if (lidar_close.shape[0] >= 4):
+
+            p = pcl.PointCloud(lidar_close[:,0:3].astype(np.float32))
+            seg = p.make_segmenter()
+            seg.set_optimize_coefficients(True)
+            seg.set_model_type(pcl.SACMODEL_PLANE)
+            seg.set_method_type(pcl.SAC_RANSAC)
+            seg.set_distance_threshold(0.25)
+            indices, model = seg.segment()
+            gp = np.zeros((lidar_close.shape[0]), dtype=np.bool)
+            gp[indices] = True
+            lidar = lidar_close[~gp]
+
+            a, b, c, d = model
+            if remove_points_below_plane and  (len(lidar) > 1 ) and (len(model)== 4):
+
+                # see http://mathworld.wolfram.com/HessianNormalForm.html
+                # we can remove / dd because we're just interested in the sign
+                # dd = np.sqrt(a ** 2 + b ** 2 + c ** 2)
+                lidar = lidar[( lidar[:, 0]* a + lidar[:,1] * b + lidar[:,2] * c  + d)  >= 0  ]
+
+            ground_z = (-d - a * cx - b * cy) / c
+            print("Centroid", cx,cy,ground_z)
+
+            if lidar.shape[0] > 4:
+
+                # obs_isolated is just lidar points centered around 0,0 and sitting on ground 0 (z=0)
+                origin = np.array([cx,cy,ground_z])
+                obs_isolated = lidar[:,0:3]-origin
+
+                d = np.sqrt(a ** 2 + b ** 2 + c ** 2)
+                nx = a / d
+                ny = b / d
+                nz = c / d
+                print("Hessian normal", nx,ny,nz)
+                roll   = np.arctan2(nx, nz)
+                pitch  = np.arctan2(ny, nz)
+                print("ground roll",  roll  * 180. / np.pi)
+                print("ground pitch", pitch * 180. / np.pi)
+
+                # rotate it so that it is aligned with our reference target
+                obs_isolated = point_utils.rotate(obs_isolated, np.array([0., 0., 1.]), self._get_yaw(frame))
+                # correct ground pitch and roll
+                print("z min before correction", np.amin(obs_isolated[:,2]))
+
+                obs_isolated = point_utils.rotate(obs_isolated, np.array([0., 1., 0.]), -roll)
+                obs_isolated = point_utils.rotate(obs_isolated, np.array([1., 0., 0.]), -pitch)
+                print("z min after correction", np.amin(obs_isolated[:,2]))
+
+                # remove stuff beyond 4 meters of the current centroid
+                obs_cx = 0 #np.mean(obs_isolated[:,0])
+                obs_cy = 0 #np.mean(obs_isolated[:,1])
+
+                obs_isolated = obs_isolated[((obs_isolated[:, 0] - obs_cx)** 2 + (obs_isolated[:, 1] - obs_cy) ** 2) <= 4 ** 2]
+
+
+                if (obs_isolated.shape[0] > 0):
+                    t_box = point_utils.rotate(self._align(obs_isolated), np.array([0., 0., 1.]), - self._get_yaw(frame))
+        print(t_box)
+        return t_box
+
+
     # return a top view of the lidar image for frame
     # draw boxes for tracked objects if with_boxes is True
     #
@@ -294,7 +432,6 @@ class DidiTracklet(object):
     def top_view(self, frame, with_boxes=True, lidar_override=None, SX=None, abl_overrides=None,
                  zoom_to_box=False, side_view=False, fine_tune_box=False, remove_ground_plane = False, remove_points_below_plane =  False):
 
-        print(frame)
         if with_boxes and zoom_to_box:
             assert self._boxes is not None
             box = self._boxes[frame][0] # first box for now
@@ -341,81 +478,6 @@ class DidiTracklet(object):
                 self._read_lidar(frame)
                 assert frame in self.lidars
             lidar = self.lidars[frame]
-
-
-        t_box = np.zeros((3))
-        if remove_ground_plane:
-
-            import pcl
-
-            # get points close to the obstacle (7m) removing capture car (3m) just in case
-            # this will be handy when we find the ground plane around the obstacle later
-            lidar_close = lidar[( ((lidar[:, 0] - cx) ** 2 + (lidar[:, 1] - cy) ** 2) < 7 ** 2) & ((lidar[:, 0] ** 2 + lidar[:, 1] ** 2) >= 3**2)]
-
-            # at a minimum we need 4 points (3 ground plane points plus 1 obstacle point)
-            if (lidar_close.shape[0] >= 4):
-
-                p = pcl.PointCloud(lidar_close[:,0:3].astype(np.float32))
-                seg = p.make_segmenter()
-                seg.set_optimize_coefficients(True)
-                seg.set_model_type(pcl.SACMODEL_PLANE)
-                seg.set_method_type(pcl.SAC_RANSAC)
-                seg.set_distance_threshold(0.25)
-                indices, model = seg.segment()
-                gp = np.zeros((lidar_close.shape[0]), dtype=np.bool)
-                gp[indices] = True
-                lidar = lidar_close[~gp]
-
-                a, b, c, d = model
-                if remove_points_below_plane and  (len(lidar) > 1 ) and (len(model)== 4):
-
-                    # see http://mathworld.wolfram.com/HessianNormalForm.html
-                    # we can remove / dd because we're just interested in the sign
-                    # dd = np.sqrt(a ** 2 + b ** 2 + c ** 2)
-                    lidar = lidar[( lidar[:, 0]* a + lidar[:,1] * b + lidar[:,2] * c  + d)  >= 0  ]
-
-                ground_z = (-d - a * cx - b * cy) / c
-                print(cx,cy,ground_z)
-
-                if side_view is False and (lidar.shape[0] > 4):
-
-                    # obs_isolated is just lidar points centered around 0,0 and sitting on ground 0 (z=0)
-                    origin = np.array([cx,cy,ground_z])
-                    obs_isolated = lidar[:,0:3]-origin
-
-                    d = np.sqrt(a ** 2 + b ** 2 + c ** 2)
-                    nx = a / d
-                    ny = b / d
-                    nz = c / d
-                    roll = np.arctan2(nx, nz)
-                    pitch  = np.arctan2(ny, nz)
-                    print("ground roll",  roll  * 180. / np.pi)
-                    print("ground pitch", pitch * 180. / np.pi)
-
-                    # rotate it so that it is aligned with our reference target
-                    obs_isolated = point_utils.rotate(obs_isolated, np.array([0., 0., 1.]), self._get_yaw(frame))
-                    # correct ground pitch and roll
-                    print("z min before correction", np.amin(obs_isolated[:,2]))
-
-                    obs_isolated = point_utils.rotate(obs_isolated, np.array([1., 0., 0.]), -roll)
-                    obs_isolated = point_utils.rotate(obs_isolated, np.array([0., 1., 0.]), -pitch)
-                    print("z min after correction", np.amin(obs_isolated[:,2]))
-
-                    # remove stuff beyond 4 meters of the current centroid
-                    obs_cx = 0 #np.mean(obs_isolated[:,0])
-                    obs_cy = 0 #np.mean(obs_isolated[:,1])
-
-                    obs_isolated = obs_isolated[((obs_isolated[:, 0] - obs_cx)** 2 + (obs_isolated[:, 1] - obs_cy) ** 2) <= 4 ** 2]
-
-                    np.save(str(frame), obs_isolated)
-                    np.savetxt(str(frame)+".txt", obs_isolated)
-
-                    if fine_tune_box and (obs_isolated.shape[0] > 0):
-                        t_box = point_utils.rotate(self.align(obs_isolated), np.array([0., 0., 1.]), - self._get_yaw(frame))
-
-                    #np.save(str(frame), lidar[:,0:3]-origin )
-
-
 
         if side_view:
             lidar = lidar[(lidar[:,1] >= -1.) & (lidar[:,1] <= 1.)]
@@ -475,6 +537,8 @@ class DidiTracklet(object):
                         top_view[toXY(x, y)[::-1]] = (0., 1., 1.)
 
                 if fine_tune_box:
+
+                    t_box = self.align(frame)
 
                     max_box = box + np.expand_dims(t_box, axis=1)
 

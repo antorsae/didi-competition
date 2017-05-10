@@ -15,52 +15,6 @@ def rotate(points, axis, theta):
     else:
         return np.dot(points[:, 0:3], M(axis, theta))
 
-
-def best_fit_transform(A, B):
-    '''
-    Calculates the least-squares best-fit transform between corresponding 3D points A->B
-    Input:
-      A: Nx3 numpy array of corresponding 3D points
-      B: Nx3 numpy array of corresponding 3D points
-    Returns:
-      T: 4x4 homogeneous transformation matrix
-      R: 3x3 rotation matrix
-      t: 3x1 column vector
-    '''
-
-    # assert len(A) == len(B)
-
-    # translate points to their centroids
-
-    #centroid_A = np.mean(A, axis=0)
-    centroid_A = (np.amax(A, axis=0) - np.amin(A, axis=0)) / 2. + np.amin(A, axis=0)
-
-
-    centroid_B = np.mean(B, axis=0)
-    #AA = A - centroid_A
-    #BB = B - centroid_B
-
-    # rotation matrix
-    # H = np.dot(AA.T, BB)
-    # U, S, Vt = np.linalg.svd(H)
-    # R = np.dot(Vt.T, U.T)
-
-    # special reflection case
-    # if np.linalg.det(R) < 0:
-    #   Vt[2,:] *= -1
-    #   R = np.dot(Vt.T, U.T)
-
-    # translation
-    t = centroid_B.T - centroid_A
-    t[2] = 0
-
-    # homogeneous transformation
-    T = np.identity(4)
-    T[0:3, 3] = t
-
-    return t
-
-
 def nearest_neighbor(src, dst):
     '''
     Find the nearest (Euclidean) neighbor in dst for each point in src
@@ -72,12 +26,8 @@ def nearest_neighbor(src, dst):
         indices: dst indices of the nearest neighbor
     '''
 
-    zs = src[:,2]
-    zc, ze = np.histogram(zs)
     distances = np.empty(src.shape[0], dtype=np.float32)
     indices   = np.empty(src.shape[0], dtype=np.int32)
-
-    # TODO: Optimize this grouping points in z clusters
 
     pending_points  = np.array(src)
 
@@ -96,19 +46,42 @@ def nearest_neighbor(src, dst):
 
     return distances, indices
 
-def norm_nearest_neighbor(t, src, dst):
+def rotZ(points, yaw):
+    rotMat = np.array([
+        [np.cos(yaw), -np.sin(yaw), 0.0],
+        [np.sin(yaw), np.cos(yaw), 0.0],
+        [0.0, 0.0, 1.0]])
+    return np.dot(points, rotMat)
+
+def norm_nearest_neighbor(t, src, dst, search_yaw=False):
     _t = np.empty(3)
-    _t[:2] = t
+    _t[:2] = t[:2]
     _t[2]  = 0
-    distances, _ = nearest_neighbor(_t + src, dst)
+    if search_yaw:
+        yaw    = t[2]
+        distances, _ = nearest_neighbor(_t + rotZ(src,yaw), dst)
+    else:
+
+        distances, _ = nearest_neighbor(_t + src, dst)
     return np.sum(distances) / src.shape[0]
 
-def icp(A, B, init_pose=None, max_iterations=10000, tolerance=0.0001):
-    result = scipy.optimize.minimize(norm_nearest_neighbor, np.array([0.,0.]), args=(A, B), method='Powell')
-    t = np.empty(3)
-    t[:2] = result.x
-    t[2]  = 0
-    distances, _ = nearest_neighbor(t + A, B)
+def icp(A, B, search_yaw=False):
+    result = scipy.optimize.minimize(
+        norm_nearest_neighbor,
+        np.array([0.,0.,3*np.pi/4.-np.pi/2.]) if search_yaw else np.array([0.,0.]),
+        args=(A, B, search_yaw),
+        method='Powell')
+    if search_yaw:
+        t = np.empty(4)
+        t[:2] = result.x[:2]
+        t[2]  = 0
+        t[3]  = result.x[2]
+        distances, _ = nearest_neighbor(t[:3] + rotZ(A, t[3]), B)
+    else:
+        t = np.empty(3)
+        t[:2] = result.x[:2]
+        t[2]  = 0
+        distances, _ = nearest_neighbor(t[:3] + A, B)
     return t, distances
 
 class ICP(object):
@@ -118,18 +91,21 @@ class ICP(object):
         d = x*sin(theta) + y*cos(theta)
     which allows you to have vertical lines.
     '''
+    def __init__(self, search_yaw=False):
+        self.search_yaw = search_yaw
 
     def fit(self, first, reference):
-        _icp = icp(first, reference)
+        _icp = icp(first, reference, self.search_yaw)
         return _icp[0]
 
     def residuals(self, t, first, reference):
-        distances, _ = nearest_neighbor(first + t, reference)
+        if self.search_yaw:
+            distances, _ = nearest_neighbor(rotZ(first,t[3]) + t[:3], reference)
+        else:
+            distances, _ = nearest_neighbor(           first + t[:3], reference)
 
         return np.abs(distances)
 
-    def is_degenerate(self, sample):
-        return False
 
 def ransac(first, reference, model_class, min_samples, threshold):
     '''
@@ -166,6 +142,12 @@ def ransac(first, reference, model_class, min_samples, threshold):
         print("Removed " + str(first_points - first.shape[0]) + " points due to Z cropping")
 
 
+    if first.shape[0] > 1:
+        print("Fitting " + str(first.shape[0]) + " points to reference object")
+    else:
+        print("No points to fit, returning")
+        return None, None
+
     best_model = None
     best_inlier_num = 0
     best_inliers = None
@@ -176,20 +158,16 @@ def ransac(first, reference, model_class, min_samples, threshold):
     second_best_model_inliers_residua = 1e100
     second_best_score = 0
 
-
     first_idx = np.arange(first.shape[0])
     import scipy.cluster.hierarchy
-    Z = scipy.cluster.hierarchy.linkage(first, 'ward')
-    max_d = 3
+    Z = scipy.cluster.hierarchy.linkage(first, 'single')
+    max_d = 0.5
     clusters = scipy.cluster.hierarchy.fcluster(Z, max_d, criterion='distance')
     unique_clusters = np.unique(clusters)
     for cluster in unique_clusters:
         sample_idx = np.where(clusters==cluster)
         sample  = first[sample_idx]
         print("Trying cluster " + str(cluster) +  " / " + str(len(unique_clusters)) + " with " + str(sample_idx[0].shape[0]) + " points")
-
-        if model_class.is_degenerate(sample):
-            continue
 
         max_attempts = 10
         while max_attempts > 0:

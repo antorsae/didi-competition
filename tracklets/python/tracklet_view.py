@@ -1,32 +1,9 @@
 import argparse
 import numpy as np
-import os
-import sys
-import re
+
 from diditracklet import *
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtGui, QtCore
-
-
-def find_tracklets(
-        directory,
-        filter = None,
-        pattern="tracklet_labels.xml"):
-    diditracklets = []
-    combined_filter = "(" + ")|(".join(filter) + "$)" if filter is not None else None
-    if combined_filter is not None:
-        combined_filter = combined_filter.replace("*", ".*")
-
-    for root, dirs, files in os.walk(directory):
-        for date in dirs: # 1 2 3
-            for _root, drives, files in os.walk(os.path.join(root, date)): # ./1/ ./18/ ...
-                for drive in drives:
-                    if os.path.isfile(os.path.join(_root, drive, pattern)):
-                        if filter is None or re.match(combined_filter, date + '/' + drive):
-                            diditracklet = DidiTracklet(root, date, drive)
-                            diditracklets.append(diditracklet)
-
-    return diditracklets
 
 if __name__ == '__main__':
 
@@ -66,9 +43,11 @@ if __name__ == '__main__':
                                 help='Input folder where processed tracklet subdirectories are located')
             parser.add_argument('-f', '--filter', type=str, nargs='+', default=None,
                                 help='Only include date/drive tracklet subdirectories, e.g. -f 1/21_f 2/24')
+            parser.add_argument('-y', '--yaw', type=float, nargs='?', default=0.,
+                                help='Force initial yaw correction (e.g. -y 0.88)')
             args = parser.parse_args()
 
-            diditracklets = find_tracklets(args.indir, args.filter)
+            diditracklets = find_tracklets(args.indir, args.filter, args.yaw)
 
             for tracklet in diditracklets:
                 tvv = None
@@ -90,10 +69,6 @@ if __name__ == '__main__':
     thread = Thread()
     thread.new_image.connect(update)
     thread.start()
-
-
-
-
 
     import sys
 
