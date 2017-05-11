@@ -35,7 +35,8 @@ def find_tracklets(
         directory,
         filter=None,
         yaw_correction=0.,
-        xml_filename="tracklet_labels.xml"):
+        xml_filename="tracklet_labels_refined.xml",
+        flip=False):
     diditracklets = []
     combined_filter = "(" + ")|(".join(filter) + "$)" if filter is not None else None
     if combined_filter is not None:
@@ -47,7 +48,10 @@ def find_tracklets(
                 for drive in drives:
                     if os.path.isfile(os.path.join(_root, drive, xml_filename)):
                         if filter is None or re.match(combined_filter, date + '/' + drive):
-                            diditracklet = DidiTracklet(root, date, drive, yaw_correction=yaw_correction, xml_filename=xml_filename)
+                            diditracklet = DidiTracklet(root, date, drive,
+                                                        yaw_correction=yaw_correction,
+                                                        xml_filename=xml_filename,
+                                                        flip=flip)
                             diditracklets.append(diditracklet)
 
     return diditracklets
@@ -59,7 +63,7 @@ class DidiTracklet(object):
 
     LIDAR_ANGLE = np.pi / 6.
 
-    def __init__(self, basedir, date, drive, yaw_correction=0., xml_filename="tracklet_labels.xml"):
+    def __init__(self, basedir, date, drive, yaw_correction=0., xml_filename="tracklet_labels.xml", flip=False):
         self.basedir = basedir
         self.date    = date
         self.drive   = drive
@@ -94,7 +98,7 @@ class DidiTracklet(object):
 
         # TODO FIX THIS
         if os.path.isfile(reference_file):
-            flip = True if os.path.isfile(os.path.join(basedir, date, drive, 'flip-reference')) else False
+            #flip = True if os.path.isfile(os.path.join(basedir, date, drive, 'flip-reference')) else False
             if flip:
                 print("Flipping")
             else:
@@ -144,6 +148,7 @@ class DidiTracklet(object):
                 t =  np.zeros((3))
 
         else:
+            print("No reference object, not aligning")
             t    = np.zeros((3))
         return t
 
@@ -361,7 +366,12 @@ class DidiTracklet(object):
     def _remove_capture_vehicle(self, lidar):
         return lidar[~ ((np.abs(lidar[:, 0]) < 2.6) & (np.abs(lidar[:, 1]) < 1.))]
 
-    def refine_box(self, frame, remove_points_below_plane =  True, search_ground_plane_radius = 10., search_centroid_radius = 4., look_back_last_refined_centroid=None):
+    def refine_box(self,
+                   frame,
+                   remove_points_below_plane =  True,
+                   search_ground_plane_radius = 20.,
+                   search_centroid_radius = 4.,
+                   look_back_last_refined_centroid=None):
 
         if look_back_last_refined_centroid is None:
             assert self._boxes is not None
@@ -413,10 +423,10 @@ class DidiTracklet(object):
             ground_z = (-d - a * cx - b * cy) / c
             print("Original centroid @ " + str((cx,cy,cz)) + " ground_z estimated @ " + str(ground_z)  )
 
+            origin = np.array([cx, cy, ground_z])
             if lidar.shape[0] > 4:
 
                 # obs_isolated is just lidar points centered around 0,0 and sitting on ground 0 (z=0)
-                origin = np.array([cx,cy,ground_z])
                 obs_isolated = lidar[:,0:3]-origin
 
                 dd = np.sqrt(a ** 2 + b ** 2 + c ** 2)
@@ -438,11 +448,11 @@ class DidiTracklet(object):
                 print("z min after correction", np.amin(obs_isolated[:,2]))
 
                 # remove stuff beyond search_centroid_radius meters of the current centroid
-                obs_cx = 0 #np.mean(obs_isolated[:,0])
+                obs_cx = 0 # np.mean(obs_isolated[:,0])
                 obs_cy = 0 #np.mean(obs_isolated[:,1])
 
                 obs_isolated = obs_isolated[(((obs_isolated[:, 0] - obs_cx)** 2) + (obs_isolated[:, 1] - obs_cy) ** 2) <= search_centroid_radius ** 2]
-
+                print("Isolated", obs_isolated.shape)
                 if (obs_isolated.shape[0] > 0):
                     t_box = point_utils.rotate(self._align(obs_isolated), np.array([0., 0., 1.]), - self._get_yaw(frame))
 
@@ -455,6 +465,9 @@ class DidiTracklet(object):
             new_ground_z = (-d - a * (cx+t_box[0]) - b * (cy+t_box[1])) / c
             print("original z centroid", T[2], "new ground_z", new_ground_z)
             t_box[2] = new_ground_z + self.tracklet_data[0].size[0]/2. - T[2]
+
+            if look_back_last_refined_centroid is not None:
+                t_box[:2] = t_box[:2] + origin[:2] - T[:2]
 
             if (t_box[0] != 0.) or (t_box[1] != 0.):
                 self._last_refined_box = T + t_box
@@ -486,8 +499,8 @@ class DidiTracklet(object):
         else:
             cx = 0.
             cy = 0.
-            X_SPAN = 80.
-            Y_SPAN = 80.
+            X_SPAN = 110.
+            Y_SPAN = 110.
 
         X_RANGE = (cx - X_SPAN / 2., cx + X_SPAN / 2.)
         Y_RANGE = (cy - Y_SPAN / 2., cy + Y_SPAN / 2.)
@@ -522,6 +535,8 @@ class DidiTracklet(object):
                 self._read_lidar(frame)
                 assert frame in self.lidars
             lidar = self.lidars[frame]
+
+        lidar = self._remove_capture_vehicle(lidar)
 
         if side_view:
             lidar = lidar[(lidar[:,1] >= -1.) & (lidar[:,1] <= 1.)]

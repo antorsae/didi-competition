@@ -201,9 +201,9 @@ def interpolate_to_target(target_df, other_dfs, filter_cols=[]):
         left, right, how='outer', left_index=True, right_index=True), [target_df] + other_dfs)
     merged.interpolate(method='time', inplace=True, limit=100, limit_direction='both')
 
-    filtered = merged.loc[target_df.index]  # back to only camera rows
+    filtered = merged.loc[target_df.index].copy()  # back to only camera rows
     filtered.fillna(0.0, inplace=True)
-    filtered['timestamp'] = filtered.index.astype('int')  # add back original timestamp integer col
+    filtered.loc[:,'timestamp'] = filtered.index.astype('int')  # add back original timestamp integer col
     if filter_cols:
         if not 'timestamp' in filter_cols:
             filter_cols += ['timestamp']
@@ -378,6 +378,8 @@ def main():
 
             elif topic in CAP_FRONT_RTK_TOPICS:
                 rtk2dict(timestamp, msg, cap_front_rtk_dict)
+                # hack for test file ->
+                # rtk2dict(timestamp, msg, obstacle_rtk_dicts['/objects/obs1/rear/gps/rtkfix'])
                 stats['msg_count'] += 1
 
             elif topic in CAP_REAR_GPS_TOPICS:

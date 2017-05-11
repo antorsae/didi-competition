@@ -47,6 +47,8 @@ if __name__ == '__main__':
                                 help='Force initial yaw correction (e.g. -y 0.88)')
             parser.add_argument('-x', '--xml-filename', type=str, nargs='?', default='tracklet_labels.xml',
                                 help='tracklet xml filename (defaults to tracklet_labels.xml)')
+            parser.add_argument('-z', '--zoom-to-box', action='store_true',
+                                help='zoom view to bounding box')
             args = parser.parse_args()
 
             diditracklets = find_tracklets(args.indir, args.filter, args.yaw, args.xml_filename)
@@ -56,7 +58,7 @@ if __name__ == '__main__':
 
                 for frame in tracklet.frames():
 
-                    tv = tracklet.top_and_side_view(frame, with_boxes=True, zoom_to_box=True, SX=400)
+                    tv = tracklet.top_and_side_view(frame, with_boxes=True, zoom_to_box=args.zoom_to_box, SX=400)
                     if tvv is None:
                         tvv = np.expand_dims(tv, axis=0)
                     else:
