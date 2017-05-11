@@ -7,7 +7,7 @@ import point_utils
 from diditracklet import *
 from generate_tracklet import *
 
-parser = argparse.ArgumentParser(description='Find point cloud translations')
+parser = argparse.ArgumentParser(description='Refine tracklets by finding pose of reference object or smoothing trajectory')
 parser.add_argument('-1', '--first', type=int, action='store', help='Do one frame only, e.g. -1 87 (does frame 87)')
 #parser.add_argument('-s', '--search-yaw', action='store_true', help='Search for yaw')
 parser.add_argument('-r', '--reference', type=str, action = 'store', help='First point cloud file name')
@@ -18,11 +18,17 @@ parser.add_argument('-f', '--filter', type=str, nargs='+', default=None,
                     help='Only include date/drive tracklet subdirectories, e.g. -f 1/21_f 2/24')
 parser.add_argument('-y', '--yaw', type=float, nargs='?', default=0.,
                     help='Force initial yaw correction (e.g. -y 0.88)')
+parser.add_argument('-xi', '--input-xml-filename', type=str, nargs='?', default='tracklet_labels.xml',
+                    help='input tracklet xml filename (defaults to tracklet_labels.xml)')
+parser.add_argument('-xo', '--output-xml-filename', type=str, nargs='?', default='tracklet_labels_refined.xml',
+                    help='output tracklet xml filename (defaults to tracklet_labels.xml)')
+parser.add_argument('-d', '--dump', action='store_true', help='Print csv or x,y,z translations and does not ')
+parser.add_argument('-n', '--no-refine', action='store_true', help='Do not attempt to fit reference vehicle')
 
 args = parser.parse_args()
 #search_yaw =  args.search_yaw
 
-diditracklets = find_tracklets(args.indir, filter=args.filter, yaw_correction=args.yaw)
+diditracklets = find_tracklets(args.indir, filter=args.filter, yaw_correction=args.yaw, xml_filename=args.input_xml_filename)
 
 for tracklet in diditracklets:
 
@@ -33,13 +39,17 @@ for tracklet in diditracklets:
     t_boxes = []
     for frame in frames:
         print("Frame: " + str(frame) + " / " + str(len(frames)))
-        t_box = tracklet.refine_box(frame)
+        if args.no_refine:
+            t_box = np.zeros(3)
+        else:
+            t_box = tracklet.refine_box(frame)
         t_boxes.append(t_box)
         print("")
 
     # WRITING TRACKLET
+
     collection = TrackletCollection()
-    l, w, h = tracklet.get_box_size()
+    h, w, l = tracklet.get_box_size()
     obs_tracklet = Tracklet(object_type='Car', l=l,w=w,h=h, first_frame=tracklet.get_box_first_frame())
 
     for frame, t_box in zip(frames, t_boxes):
@@ -48,10 +58,12 @@ for tracklet in diditracklets:
         pose['ty'] += t_box[1]
         pose['tz'] += t_box[2]
         obs_tracklet.poses.append(pose)
+        if args.dump:
+            print(str(pose['tx']) + "," + str(pose['ty']) + ","+ str(pose['tz']))
     collection.tracklets.append(obs_tracklet)
         # end for obs_topic loop
 
-    tracklet_path = os.path.join(tracklet.xml_path , 'tracklet_labels-out.xml')
+    tracklet_path = os.path.join(tracklet.xml_path , args.output_xml_filename)
     collection.write_xml(tracklet_path)
 
 '''

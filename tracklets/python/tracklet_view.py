@@ -45,9 +45,11 @@ if __name__ == '__main__':
                                 help='Only include date/drive tracklet subdirectories, e.g. -f 1/21_f 2/24')
             parser.add_argument('-y', '--yaw', type=float, nargs='?', default=0.,
                                 help='Force initial yaw correction (e.g. -y 0.88)')
+            parser.add_argument('-x', '--xml-filename', type=str, nargs='?', default='tracklet_labels.xml',
+                                help='tracklet xml filename (defaults to tracklet_labels.xml)')
             args = parser.parse_args()
 
-            diditracklets = find_tracklets(args.indir, args.filter, args.yaw)
+            diditracklets = find_tracklets(args.indir, args.filter, args.yaw, args.xml_filename)
 
             for tracklet in diditracklets:
                 tvv = None

@@ -35,7 +35,7 @@ def find_tracklets(
         directory,
         filter=None,
         yaw_correction=0.,
-        pattern="tracklet_labels.xml"):
+        xml_filename="tracklet_labels.xml"):
     diditracklets = []
     combined_filter = "(" + ")|(".join(filter) + "$)" if filter is not None else None
     if combined_filter is not None:
@@ -45,9 +45,9 @@ def find_tracklets(
         for date in dirs:  # 1 2 3
             for _root, drives, files in os.walk(os.path.join(root, date)):  # ./1/ ./18/ ...
                 for drive in drives:
-                    if os.path.isfile(os.path.join(_root, drive, pattern)):
+                    if os.path.isfile(os.path.join(_root, drive, xml_filename)):
                         if filter is None or re.match(combined_filter, date + '/' + drive):
-                            diditracklet = DidiTracklet(root, date, drive, yaw_correction=yaw_correction)
+                            diditracklet = DidiTracklet(root, date, drive, yaw_correction=yaw_correction, xml_filename=xml_filename)
                             diditracklets.append(diditracklet)
 
     return diditracklets
@@ -90,6 +90,8 @@ class DidiTracklet(object):
         self._boxes = None  # defaultdict(list)
 
         reference_file = os.path.join(basedir, date, 'obs.txt')
+
+        # TODO FIX THIS
         if os.path.isfile(reference_file):
             flip = True if os.path.isfile(os.path.join(basedir, date, drive, 'flip-reference')) else False
             if flip:
@@ -165,7 +167,7 @@ class DidiTracklet(object):
 
     def get_box_size(self, box=0):
         assert len(self.tracklet_data) == 1 # only one tracklet supported for now!
-        return self.tracklet_data[box].size
+        return self.tracklet_data[box].size # h w l
 
     def get_box_TR(self, frame, box=0):
         assert len(self.tracklet_data) == 1 # only one tracklet supported for now!
@@ -252,7 +254,9 @@ class DidiTracklet(object):
                             [  # in velodyne coordinates around zero point and without orientation yet\
                                 [-l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2, l / 2, l / 2], \
                                 [w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2, w / 2], \
-                                [0.0, 0.0, 0.0, 0.0, h, h, h, h]])
+                                [-h/2., -h/2., -h/2., -h/2., h/2., h/2., h/2., h/2.]])
+
+                        #[0.0, 0.0, 0.0, 0.0, h, h, h, h]])
                         yaw = t.rots[idx][2]  # other rotations are 0 in all xml files I checked
 
                         # IMPORTANT -> ignoring orientation so that we get ordered coordinates w/o orientation
@@ -354,7 +358,7 @@ class DidiTracklet(object):
     def top_and_side_view(self, frame, with_boxes=True, lidar_override=None, SX=None, abl_overrides=None, zoom_to_box=False):
         tv = self.top_view(frame, with_boxes=with_boxes, lidar_override=lidar_override,
                            SX=SX, abl_overrides=abl_overrides, zoom_to_box=zoom_to_box,
-                           remove_ground_plane=True, fine_tune_box = True, remove_points_below_plane = True)
+                           remove_ground_plane=False, fine_tune_box = False, remove_points_below_plane = False)
         sv = self.top_view(frame, with_boxes=with_boxes, lidar_override=lidar_override,
                            SX=SX, abl_overrides=abl_overrides, zoom_to_box=zoom_to_box,
                            side_view=True, remove_points_below_plane = False)
@@ -367,6 +371,10 @@ class DidiTracklet(object):
         cx = np.average(box[0, :])
         cy = np.average(box[1, :])
         cz = np.average(box[2, :])
+
+        T, _ = self.get_box_TR(frame)
+        print("averaged centroid", cx,cy,cz, " vs ",T[0], T[1], T[2])
+
         t_box = np.zeros((3))
 
         if frame not in self.lidars:
@@ -404,7 +412,7 @@ class DidiTracklet(object):
                 lidar = lidar[( lidar[:, 0]* a + lidar[:,1] * b + lidar[:,2] * c  + d)  >= 0  ]
 
             ground_z = (-d - a * cx - b * cy) / c
-            print("Centroid", cx,cy,ground_z)
+            print("Original centroid @ " + str((cx,cy,cz)) + " ground_z estimated @ " + str(ground_z)  )
 
             if lidar.shape[0] > 4:
 
@@ -412,10 +420,10 @@ class DidiTracklet(object):
                 origin = np.array([cx,cy,ground_z])
                 obs_isolated = lidar[:,0:3]-origin
 
-                d = np.sqrt(a ** 2 + b ** 2 + c ** 2)
-                nx = a / d
-                ny = b / d
-                nz = c / d
+                dd = np.sqrt(a ** 2 + b ** 2 + c ** 2)
+                nx = a / dd
+                ny = b / dd
+                nz = c / dd
                 print("Hessian normal", nx,ny,nz)
                 roll   = np.arctan2(nx, nz)
                 pitch  = np.arctan2(ny, nz)
@@ -441,7 +449,10 @@ class DidiTracklet(object):
                     t_box = point_utils.rotate(self._align(obs_isolated), np.array([0., 0., 1.]), - self._get_yaw(frame))
 
             new_ground_z = (-d - a * (cx+t_box[0]) - b * (cy+t_box[1])) / c
-            t_box[2] = new_ground_z + self.tracklet_data[0].size[2]/2. - cz
+            T, _ = self.get_box_TR(frame)
+            print("original z centroid", cz, T[2], "new ground_z", new_ground_z)
+            t_box[2] = new_ground_z + self.tracklet_data[0].size[0]/2. - cz
+
 
         print(t_box)
 
