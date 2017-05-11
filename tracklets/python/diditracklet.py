@@ -88,6 +88,7 @@ class DidiTracklet(object):
 
         # boxes is a dict indexed by frame:  e.g. boxes[10] = [box, box, ...]
         self._boxes = None  # defaultdict(list)
+        self._last_refined_box = None
 
         reference_file = os.path.join(basedir, date, 'obs.txt')
 
@@ -255,17 +256,9 @@ class DidiTracklet(object):
                                 [-l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2, l / 2, l / 2], \
                                 [w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2, w / 2], \
                                 [-h/2., -h/2., -h/2., -h/2., h/2., h/2., h/2., h/2.]])
-
-                        #[0.0, 0.0, 0.0, 0.0, h, h, h, h]])
+                                # CAREFUL: DIDI/UDACITY changed the semantics of a TZ!
+                                #[0.0, 0.0, 0.0, 0.0, h, h, h, h]]) #
                         yaw = t.rots[idx][2]  # other rotations are 0 in all xml files I checked
-
-                        # IMPORTANT -> ignoring orientation so that we get ordered coordinates w/o orientation
-                        #yaw = np.fmod(yaw, np.pi)
-                        #if yaw >= np.pi / 2.:
-                        #    yaw -= np.pi
-                        #elif yaw <= -np.pi / 2.:
-                        #    yaw += np.pi
-                        #assert (yaw <= np.pi / 2) and (yaw >= -np.pi / 2)
 
                         assert np.abs(t.rots[idx][:2]).sum() == 0, 'object rotations other than yaw given!'
                         rotMat = np.array([
@@ -325,11 +318,13 @@ class DidiTracklet(object):
                 i += v
         return subsampled
 
-    def get_lidar(self, frame, num_points = None):
+    def get_lidar(self, frame, num_points = None, remove_capture_vehicle=True):
         if frame not in self.lidars:
             self._read_lidar(frame)
             assert frame in self.lidars
         lidar = self.lidars[frame]
+        if remove_capture_vehicle:
+            lidar = self._remove_capture_vehicle(lidar)
         if num_points is not None:
             lidar_size = lidar.shape[0]
             if num_points > lidar_size:
@@ -354,7 +349,6 @@ class DidiTracklet(object):
         lidar = self.lidars[frame]
         return len(self.__lidar_in_box(lidar, box, ignore_z=ignore_z))
 
-
     def top_and_side_view(self, frame, with_boxes=True, lidar_override=None, SX=None, abl_overrides=None, zoom_to_box=False):
         tv = self.top_view(frame, with_boxes=with_boxes, lidar_override=lidar_override,
                            SX=SX, abl_overrides=abl_overrides, zoom_to_box=zoom_to_box,
@@ -364,13 +358,20 @@ class DidiTracklet(object):
                            side_view=True, remove_points_below_plane = False)
         return np.concatenate((tv, sv), axis=0)
 
+    def _remove_capture_vehicle(self, lidar):
+        return lidar[~ ((np.abs(lidar[:, 0]) < 2.6) & (np.abs(lidar[:, 1]) < 1.))]
 
-    def refine_box(self, frame, remove_points_below_plane =  True):
-        assert self._boxes is not None
-        box = self._boxes[frame][0]  # first box for now
-        cx = np.average(box[0, :])
-        cy = np.average(box[1, :])
-        cz = np.average(box[2, :])
+    def refine_box(self, frame, remove_points_below_plane =  True, search_ground_plane_radius = 10., search_centroid_radius = 4., look_back_last_refined_centroid=None):
+
+        if look_back_last_refined_centroid is None:
+            assert self._boxes is not None
+            box = self._boxes[frame][0]  # first box for now
+            cx = np.average(box[0, :])
+            cy = np.average(box[1, :])
+            cz = np.average(box[2, :])
+        else:
+            cx,cy,cz = look_back_last_refined_centroid
+            print("Using last refined centroid", cx,cy,cz)
 
         T, _ = self.get_box_TR(frame)
         print("averaged centroid", cx,cy,cz, " vs ",T[0], T[1], T[2])
@@ -382,12 +383,10 @@ class DidiTracklet(object):
             assert frame in self.lidars
         lidar = self.lidars[frame]
 
-        lidar_without_capture = lidar[~ ((np.abs(lidar[:, 0]) < 2.6) & (np.abs(lidar[:, 1]) < 1.))]
-
         # get points close to the obstacle (d_range meters) removing capture car (2.6m x, 1m y) just in case
         # this will be handy when we find the ground plane around the obstacle later
-        d_range = 10.
-        lidar_close = lidar_without_capture[( ((lidar_without_capture[:, 0] - cx) ** 2 + (lidar_without_capture[:, 1] - cy) ** 2) < d_range ** 2) ]
+        lidar_without_capture = self._remove_capture_vehicle(lidar)
+        lidar_close = lidar_without_capture[( ((lidar_without_capture[:, 0] - cx) ** 2 + (lidar_without_capture[:, 1] - cy) ** 2) < search_ground_plane_radius ** 2) ]
 
         # at a minimum we need 4 points (3 ground plane points plus 1 obstacle point)
         if (lidar_close.shape[0] >= 4):
@@ -404,7 +403,7 @@ class DidiTracklet(object):
             lidar = lidar_close[~gp]
 
             a, b, c, d = model
-            if remove_points_below_plane and  (len(lidar) > 1 ) and (len(model)== 4):
+            if remove_points_below_plane and (len(lidar) > 1 ) and (len(model)== 4):
 
                 # see http://mathworld.wolfram.com/HessianNormalForm.html
                 # we can remove / dd because we're just interested in the sign
@@ -427,8 +426,7 @@ class DidiTracklet(object):
                 print("Hessian normal", nx,ny,nz)
                 roll   = np.arctan2(nx, nz)
                 pitch  = np.arctan2(ny, nz)
-                print("ground roll",  roll  * 180. / np.pi)
-                print("ground pitch", pitch * 180. / np.pi)
+                print("ground roll | pitch " + str(roll  * 180. / np.pi) + " | " + str(pitch * 180. / np.pi))
 
                 # rotate it so that it is aligned with our reference target
                 obs_isolated = point_utils.rotate(obs_isolated, np.array([0., 0., 1.]), self._get_yaw(frame))
@@ -439,20 +437,29 @@ class DidiTracklet(object):
                 obs_isolated = point_utils.rotate(obs_isolated, np.array([1., 0., 0.]), -pitch)
                 print("z min after correction", np.amin(obs_isolated[:,2]))
 
-                # remove stuff beyond 4 meters of the current centroid
+                # remove stuff beyond search_centroid_radius meters of the current centroid
                 obs_cx = 0 #np.mean(obs_isolated[:,0])
                 obs_cy = 0 #np.mean(obs_isolated[:,1])
 
-                obs_isolated = obs_isolated[((obs_isolated[:, 0] - obs_cx)** 2 + (obs_isolated[:, 1] - obs_cy) ** 2) <= 4 ** 2]
+                obs_isolated = obs_isolated[(((obs_isolated[:, 0] - obs_cx)** 2) + (obs_isolated[:, 1] - obs_cy) ** 2) <= search_centroid_radius ** 2]
 
                 if (obs_isolated.shape[0] > 0):
                     t_box = point_utils.rotate(self._align(obs_isolated), np.array([0., 0., 1.]), - self._get_yaw(frame))
 
-            new_ground_z = (-d - a * (cx+t_box[0]) - b * (cy+t_box[1])) / c
-            T, _ = self.get_box_TR(frame)
-            print("original z centroid", cz, T[2], "new ground_z", new_ground_z)
-            t_box[2] = new_ground_z + self.tracklet_data[0].size[0]/2. - cz
 
+            # if we didn't find it in the first place, check if we found it in the last frame and attempt to find it from there
+            if (t_box[0] == 0.) and (t_box[1] == 0.) and (look_back_last_refined_centroid is None) and (self._last_refined_box is not None):
+                print("Looking back")
+                t_box = self.refine_box(frame, look_back_last_refined_centroid=self._last_refined_box)
+
+            new_ground_z = (-d - a * (cx+t_box[0]) - b * (cy+t_box[1])) / c
+            print("original z centroid", T[2], "new ground_z", new_ground_z)
+            t_box[2] = new_ground_z + self.tracklet_data[0].size[0]/2. - T[2]
+
+            if (t_box[0] != 0.) or (t_box[1] != 0.):
+                self._last_refined_box = T + t_box
+            else:
+                self._last_refined_box = None
 
         print(t_box)
 
