@@ -63,7 +63,7 @@ class DidiTracklet(object):
 
     LIDAR_ANGLE = np.pi / 6.
 
-    def __init__(self, basedir, date, drive, yaw_correction=0., xml_filename="tracklet_labels.xml", flip=False):
+    def __init__(self, basedir, date, drive, yaw_correction=0., xml_filename="tracklet_labels_refined.xml", flip=False):
         self.basedir = basedir
         self.date    = date
         self.drive   = drive
@@ -333,7 +333,7 @@ class DidiTracklet(object):
         if num_points is not None:
             lidar_size = lidar.shape[0]
             if num_points > lidar_size:
-                lidar = np.concatenate((lidar, np.random.choice(lidar, size=num_points - lidar_size, replace=True)), axis=0)
+                lidar = np.concatenate((lidar, lidar[np.random.choice(lidar.shape[0], size=num_points - lidar_size, replace=True)]), axis=0)
             elif num_points < lidar_size:
                 lidar = self._lidar_subsample(lidar, num_points)
         return lidar
