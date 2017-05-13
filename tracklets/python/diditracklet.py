@@ -354,17 +354,42 @@ class DidiTracklet(object):
         lidar = self.lidars[frame]
         return len(self.__lidar_in_box(lidar, box, ignore_z=ignore_z))
 
-    def top_and_side_view(self, frame, with_boxes=True, lidar_override=None, SX=None, abl_overrides=None, zoom_to_box=False):
+    def top_and_side_view(self, frame, with_boxes=True, lidar_override=None, SX=None, abl_overrides=None, zoom_to_box=False, rotate_angle = None):
         tv = self.top_view(frame, with_boxes=with_boxes, lidar_override=lidar_override,
                            SX=SX, abl_overrides=abl_overrides, zoom_to_box=zoom_to_box,
-                           remove_ground_plane=False, fine_tune_box = False, remove_points_below_plane = False)
+                           remove_ground_plane=False, fine_tune_box = False, remove_points_below_plane = False, rotate_angle = rotate_angle)
         sv = self.top_view(frame, with_boxes=with_boxes, lidar_override=lidar_override,
                            SX=SX, abl_overrides=abl_overrides, zoom_to_box=zoom_to_box,
-                           side_view=True, remove_points_below_plane = False)
+                           side_view=True, remove_points_below_plane = False, rotate_angle = rotate_angle)
         return np.concatenate((tv, sv), axis=0)
 
     def _remove_capture_vehicle(self, lidar):
         return lidar[~ ((np.abs(lidar[:, 0]) < 2.6) & (np.abs(lidar[:, 1]) < 1.))]
+
+    def rotate_lidar_by_angle(self, frame, rotation_angle):
+        """ Rotate the point cloud along up direction with certain angle.
+            Input:
+              BxNx3 array, original batch of point clouds
+            Return:
+              BxNx3 array, rotated batch of point clouds
+        """
+        if frame not in self.lidars:
+            self._read_lidar(frame)
+            assert frame in self.lidars
+        lidar = self.lidars[frame]
+        batch_data = lidar[:,:3]
+        rotated_data = np.zeros(batch_data.shape, dtype=np.float32)
+        for k in range(batch_data.shape[0]):
+            #rotation_angle = np.random.uniform() * 2 * np.pi
+            cosval = np.cos(rotation_angle)
+            sinval = np.sin(rotation_angle)
+            rotation_matrix = np.array([[cosval, 0, sinval],
+                                        [0, 1, 0],
+                                        [-sinval, 0, cosval]])
+            shape_pc = batch_data[k, ...]
+            rotated_data[k, ...] = np.dot(shape_pc.reshape((-1, 3)), rotation_matrix)
+        return rotated_data
+
 
     def refine_box(self,
                    frame,
@@ -487,7 +512,7 @@ class DidiTracklet(object):
     #
     # if abl_override is provided it draws
     def top_view(self, frame, with_boxes=True, lidar_override=None, SX=None, abl_overrides=None,
-                 zoom_to_box=False, side_view=False, fine_tune_box=False, remove_ground_plane = False, remove_points_below_plane =  False):
+                 zoom_to_box=False, side_view=False, fine_tune_box=False, rotate_angle = None, remove_ground_plane = False, remove_points_below_plane =  False):
 
         if with_boxes and zoom_to_box:
             assert self._boxes is not None
@@ -537,6 +562,8 @@ class DidiTracklet(object):
             lidar = self.lidars[frame]
 
         lidar = self._remove_capture_vehicle(lidar)
+        if rotate_angle is not None:
+            lidar[frame,:3] = self.rotate_lidar_by_angle(frame, rotate_angle)
 
         if side_view:
             lidar = lidar[(lidar[:,1] >= -1.) & (lidar[:,1] <= 1.)]
