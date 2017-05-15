@@ -141,10 +141,25 @@ for tracklet in diditracklets:
         plt.clf()
 
 
-        #create new poses
-        x_axis[x_axis_diff_points] = x_pred[x_axis_diff_points]
-        y_axis[y_axis_diff_points] = y_pred[y_axis_diff_points]
-        z_axis[z_axis_diff_points] = z_pred[z_axis_diff_points]
+        #modify poses using predicted values --> not accurate
+        #x_axis[x_axis_diff_points] = x_pred[x_axis_diff_points]
+        #y_axis[y_axis_diff_points] = y_pred[y_axis_diff_points]
+        #z_axis[z_axis_diff_points] = z_pred[z_axis_diff_points]
+
+        #modify poses for outliers using the neighbours mean value in all axis
+        x_axis[x_axis_diff_points] = (x_axis[np.array(x_axis_diff_points) -1 ] + x_axis[np.array(x_axis_diff_points) +1 ]) / 2
+        y_axis[x_axis_diff_points] = (y_axis[np.array(x_axis_diff_points) -1 ] + y_axis[np.array(x_axis_diff_points) +1 ]) / 2
+        z_axis[x_axis_diff_points] = (z_axis[np.array(x_axis_diff_points) -1 ] + z_axis[np.array(x_axis_diff_points) +1 ]) / 2
+
+        y_axis[y_axis_diff_points] = (y_axis[np.array(y_axis_diff_points) -1 ] + y_axis[np.array(y_axis_diff_points) +1 ]) / 2
+        x_axis[y_axis_diff_points] = (x_axis[np.array(y_axis_diff_points) -1 ] + x_axis[np.array(y_axis_diff_points) +1 ]) / 2
+        z_axis[y_axis_diff_points] = (z_axis[np.array(y_axis_diff_points) -1 ] + z_axis[np.array(y_axis_diff_points) +1 ]) / 2
+
+
+        z_axis[z_axis_diff_points] = (z_axis[np.array(z_axis_diff_points) -1 ] + z_axis[np.array(z_axis_diff_points) +1 ]) / 2
+        y_axis[z_axis_diff_points] = (y_axis[np.array(z_axis_diff_points) -1 ] + y_axis[np.array(z_axis_diff_points) +1 ]) / 2
+        x_axis[z_axis_diff_points] = (x_axis[np.array(z_axis_diff_points) -1 ] + x_axis[np.array(z_axis_diff_points) +1 ]) / 2
+
 
         t_boxes = zip(x_axis,y_axis,z_axis)
 
