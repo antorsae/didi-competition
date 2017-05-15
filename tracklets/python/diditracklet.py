@@ -312,13 +312,15 @@ class DidiTracklet(object):
                 i += v
         return subsampled
 
-    def get_lidar(self, frame, num_points = None, remove_capture_vehicle=True):
+    def get_lidar(self, frame, num_points = None, remove_capture_vehicle=True, max_distance = None):
         if frame not in self.lidars:
             self._read_lidar(frame)
             assert frame in self.lidars
         lidar = self.lidars[frame]
         if remove_capture_vehicle:
             lidar = self._remove_capture_vehicle(lidar)
+        if max_distance is not None:
+            lidar = lidar[(lidar[:,0] ** 2 + lidar[:,1] ** 2) <= (max_distance **2)]
         if num_points is not None:
             lidar_size = lidar.shape[0]
             if num_points > lidar_size:
