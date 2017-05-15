@@ -58,7 +58,7 @@ if __name__ == '__main__':
 
                 for frame in tracklet.frames():
 
-                    tv = tracklet.top_and_side_view(frame, with_boxes=True, zoom_to_box=args.zoom_to_box, SX=400, rotate_angle = 90)
+                    tv = tracklet.top_and_side_view(frame, with_boxes=True, zoom_to_box=args.zoom_to_box, SX=400, rotate_angle = None)
                     if tvv is None:
                         tvv = np.expand_dims(tv, axis=0)
                     else:
