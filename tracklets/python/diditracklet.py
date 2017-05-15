@@ -116,9 +116,6 @@ class DidiTracklet(object):
         # our reference model is in inches: convert to meters
         reference = np.multiply(reference[:, 0:3], np.array([0.0254, 0.0254, 0.0254]))
 
-        if flip:
-            reference = point_utils.rotate(reference, np.array([0.,0.,1.]), np.pi)
-
         reference_min = np.amin(reference[:, 0:3], axis=0)
         reference_lwh = np.amax(reference[:, 0:3], axis=0) - reference_min
 
@@ -126,6 +123,10 @@ class DidiTracklet(object):
 
         # our reference model is rotated: align it correctly
         reference[:, 0:3] = point_utils.rotate(reference[:,0:3], np.array([1., 0., 0.]), np.pi / 2)
+
+        # by default our reference model points to the opposite direction, so flip it accordingly
+        if not flip:
+            reference = point_utils.rotate(reference, np.array([0.,0.,1.]), np.pi)
 
         # flip it
         reference[:, 2] = -reference[:, 2]
@@ -138,7 +139,7 @@ class DidiTracklet(object):
         if self.reference is not None:
 
             model = point_utils.ICP()
-            first = point_utils.rotate(first, np.array([0., 0., 1.]), np.pi)
+            #first = point_utils.rotate(first, np.array([0., 0., 1.]), np.pi)
 
             t, _ = point_utils.ransac(first, self.reference[:, 0:3], model,
                                             min_samples=int(first.shape[0] * 0.6),
@@ -362,7 +363,8 @@ class DidiTracklet(object):
                    remove_points_below_plane =  True,
                    search_ground_plane_radius = 20.,
                    search_centroid_radius = 4.,
-                   look_back_last_refined_centroid=None):
+                   look_back_last_refined_centroid=None,
+                   return_aligned_clouds=False):
 
         if look_back_last_refined_centroid is None:
             assert self._boxes is not None
@@ -439,7 +441,7 @@ class DidiTracklet(object):
                 print("z min after correction", np.amin(obs_isolated[:,2]))
 
                 # remove stuff beyond search_centroid_radius meters of the current centroid
-                obs_cx = 0 # np.mean(obs_isolated[:,0])
+                obs_cx = 0 #np.mean(obs_isolated[:,0])
                 obs_cy = 0 #np.mean(obs_isolated[:,1])
 
                 obs_isolated = obs_isolated[(((obs_isolated[:, 0] - obs_cx)** 2) + (obs_isolated[:, 1] - obs_cy) ** 2) <= search_centroid_radius ** 2]
@@ -466,6 +468,8 @@ class DidiTracklet(object):
                 self._last_refined_box = None
 
         print(t_box)
+        if return_aligned_clouds:
+            return t_box, self.reference[:, 0:3], obs_isolated
 
         return t_box
 

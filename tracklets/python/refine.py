@@ -1,8 +1,6 @@
 import numpy as np
 from scipy.spatial.distance import cdist
 import argparse
-from pyqtgraph.Qt import QtCore, QtGui
-import pyqtgraph.opengl as gl
 import point_utils
 from diditracklet import *
 from generate_tracklet import *
@@ -23,10 +21,11 @@ parser.add_argument('-y', '--yaw', type=float, nargs='?', default=0.,
                     help='Force initial yaw correction (e.g. -y 0.88)')
 parser.add_argument('-xi', '--input-xml-filename', type=str, nargs='?', default='tracklet_labels.xml',
                     help='input tracklet xml filename (defaults to tracklet_labels.xml)')
-parser.add_argument('-xo', '--output-xml-filename', type=str, nargs='?', default='tracklet_labels_refined.xml',
-                    help='output tracklet xml filename (defaults to tracklet_labels.xml)')
+parser.add_argument('-xo', '--output-xml-filename', type=str, nargs='?',
+                    help='output tracklet xml filename')
 parser.add_argument('-d', '--dump', action='store_true', help='Print csv or x,y,z translations and does not ')
 parser.add_argument('-n', '--no-refine', action='store_true', help='Do not attempt to fit reference vehicle')
+parser.add_argument('-v', '--view', action='store_true', help='View in 3d')
 
 args = parser.parse_args()
 #search_yaw =  args.search_yaw
@@ -37,6 +36,11 @@ diditracklets = find_tracklets(args.indir,
                                xml_filename=args.input_xml_filename,
                                flip=args.flip)
 
+if args.output_xml_filename is None and args.no_refine is False:
+    print("----------------------------------------------------------------------------------------")
+    print("WARNING: no -xo or --output-xml-filename filename provided, tracklets will NOT be saved!")
+    print("----------------------------------------------------------------------------------------")
+    print("")
 for tracklet in diditracklets:
 
     print("Refining " + tracklet.xml_path)
@@ -54,59 +58,65 @@ for tracklet in diditracklets:
                 look_back_last_refined_centroid = T + t_box
             else:
                 look_back_last_refined_centroid = None
-            t_box = tracklet.refine_box(frame, look_back_last_refined_centroid = look_back_last_refined_centroid)
+            t_box, reference, first = tracklet.refine_box(frame, look_back_last_refined_centroid = look_back_last_refined_centroid, return_aligned_clouds=True)
         t_boxes.append(t_box)
         print("")
         T, _ = tracklet.get_box_TR(frame)
 
     # WRITING TRACKLET
+    if args.output_xml_filename is not None:
 
-    collection = TrackletCollection()
-    h, w, l = tracklet.get_box_size()
-    obs_tracklet = Tracklet(object_type='Car', l=l,w=w,h=h, first_frame=frames[0])
+        collection = TrackletCollection()
+        h, w, l = tracklet.get_box_size()
+        obs_tracklet = Tracklet(object_type='Car', l=l,w=w,h=h, first_frame=frames[0])
 
-    for frame, t_box in zip(frames, t_boxes):
-        pose = tracklet.get_box_pose(frame)
-        pose['tx'] += t_box[0]
-        pose['ty'] += t_box[1]
-        pose['tz'] += t_box[2]
-        obs_tracklet.poses.append(pose)
-        if args.dump:
-            print(str(pose['tx']) + "," + str(pose['ty']) + ","+ str(pose['tz']))
-    collection.tracklets.append(obs_tracklet)
-        # end for obs_topic loop
+        for frame, t_box in zip(frames, t_boxes):
+            pose = tracklet.get_box_pose(frame)
+            pose['tx'] += t_box[0]
+            pose['ty'] += t_box[1]
+            pose['tz'] += t_box[2]
+            obs_tracklet.poses.append(pose)
+            if args.dump:
+                print(str(pose['tx']) + "," + str(pose['ty']) + ","+ str(pose['tz']))
+        collection.tracklets.append(obs_tracklet)
+            # end for obs_topic loop
 
-    tracklet_path = os.path.join(tracklet.xml_path , args.output_xml_filename)
-    collection.write_xml(tracklet_path)
+        tracklet_path = os.path.join(tracklet.xml_path , args.output_xml_filename)
+        collection.write_xml(tracklet_path)
 
-'''
-app = QtGui.QApplication([])
-w = gl.GLViewWidget()
-w.opts['distance'] = 20
-w.show()
-w.setWindowTitle('pyqtgraph example: GLScatterPlotItem')
+if args.view:
 
-size=np.concatenate((
-    0.01 * np.ones(reference.shape[0]),
-    0.05 * np.ones(first_aligned.shape[0]),
-    0.05 * np.ones(first.shape[0])), axis = 0)
+    first_aligned = first + np.array([t_box[0], t_box[1], 0.])
 
-print(size.shape)
+    from pyqtgraph.Qt import QtCore, QtGui
+    import pyqtgraph.opengl as gl
 
-sp1 = gl.GLScatterPlotItem(pos=np.concatenate((reference[:,0:3], first_aligned, first), axis=0),
-                           size=size,
-                           color=np.concatenate((
-                               np.tile(np.array([0,0,1.,0.5]), (reference.shape[0],1)),
-                               np.tile(np.array([1.,1.,1.,0.8]), (first_aligned.shape[0],1)),
-                               np.tile(np.array([1., 0., 0., 0.8]), (first.shape[0], 1))
-                           ), axis = 0),
-                           pxMode=False)
-sp1.translate(5,5,0)
-w.addItem(sp1)
+    app = QtGui.QApplication([])
+    w = gl.GLViewWidget()
+    w.opts['distance'] = 20
+    w.show()
+    w.setWindowTitle('pyqtgraph example: GLScatterPlotItem')
 
-## Start Qt event loop unless running in interactive mode.
-if __name__ == '__main__':
-    import sys
-    if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
-        QtGui.QApplication.instance().exec_()
-'''
+    size=np.concatenate((
+        0.01 * np.ones(reference.shape[0]),
+        0.05 * np.ones(first_aligned.shape[0]),
+        0.05 * np.ones(first.shape[0])), axis = 0)
+
+    print(size.shape)
+
+    sp1 = gl.GLScatterPlotItem(pos=np.concatenate((reference[:,0:3], first_aligned, first), axis=0),
+                               size=size,
+                               color=np.concatenate((
+                                   np.tile(np.array([0,0,1.,0.5]), (reference.shape[0],1)),
+                                   np.tile(np.array([1.,1.,1.,0.8]), (first_aligned.shape[0],1)),
+                                   np.tile(np.array([1., 0., 0., 0.8]), (first.shape[0], 1))
+                               ), axis = 0),
+                               pxMode=False)
+    sp1.translate(5,5,0)
+    w.addItem(sp1)
+
+    ## Start Qt event loop unless running in interactive mode.
+    if __name__ == '__main__':
+        import sys
+        if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
+            QtGui.QApplication.instance().exec_()
