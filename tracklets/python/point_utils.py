@@ -47,10 +47,13 @@ def nearest_neighbor(src, dst):
     return distances, indices
 
 def rotZ(points, yaw):
-    rotMat = np.array([
-        [np.cos(yaw), -np.sin(yaw), 0.0],
-        [np.sin(yaw), np.cos(yaw), 0.0],
-        [0.0, 0.0, 1.0]])
+
+    _rotMat = np.array([
+        [np.cos(yaw), -np.sin(yaw)],
+        [np.sin(yaw), np.cos(yaw)]])
+    order = points.shape[points.ndim-1]
+    rotMat = np.eye(order)
+    rotMat[:2,:2] = _rotMat[:2,:2]
     return np.dot(points, rotMat)
 
 def norm_nearest_neighbor(t, src, dst, search_yaw=False):

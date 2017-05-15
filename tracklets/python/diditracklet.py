@@ -210,17 +210,6 @@ class DidiTracklet(object):
         self.kitti_data.load_velo()  # Each scan is a Nx4 array of [x,y,z,reflectance]
         assert len(self.kitti_data.velo) == 1
         lidar = self.kitti_data.velo[0]
-        ax = 0.0 * np.pi/180.
-        ay = 0.0 * np.pi/180.
-        from math import sin, cos
-        rx  = np.array([[1., 0., 0.], [0, cos(ax), -sin(ax)], [0, sin(ax), cos(ax)]], dtype=np.float32)
-        ry  = np.array([[cos(ay), 0., sin(ay)], [0, 1., 0.], [-sin(ay), 0, cos(ay)]], dtype=np.float32)
-
-        rc = np.eye(lidar.shape[1])
-        rc[0:3,0:3] = rx
-        lidar = np.dot(lidar, rc)
-        rc[0:3,0:3] = ry
-        lidar = np.dot(lidar, rc)
         self.lidars[frame] = lidar
         return
 
@@ -323,13 +312,15 @@ class DidiTracklet(object):
                 i += v
         return subsampled
 
-    def get_lidar(self, frame, num_points = None, remove_capture_vehicle=True):
+    def get_lidar(self, frame, num_points = None, remove_capture_vehicle=True, max_distance = None):
         if frame not in self.lidars:
             self._read_lidar(frame)
             assert frame in self.lidars
         lidar = self.lidars[frame]
         if remove_capture_vehicle:
             lidar = self._remove_capture_vehicle(lidar)
+        if max_distance is not None:
+            lidar = lidar[(lidar[:,0] ** 2 + lidar[:,1] ** 2) <= (max_distance **2)]
         if num_points is not None:
             lidar_size = lidar.shape[0]
             if num_points > lidar_size:
