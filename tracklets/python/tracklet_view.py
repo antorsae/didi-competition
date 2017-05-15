@@ -39,7 +39,7 @@ if __name__ == '__main__':
 
         def run(self):
             parser = argparse.ArgumentParser(description='View tracklets.')
-            parser.add_argument('-i', '--indir', type=str, nargs='?', default='/data',
+            parser.add_argument('-i', '--indir', type=str, nargs='?', default='../../../../release2/Data-points-processed',
                                 help='Input folder where processed tracklet subdirectories are located')
             parser.add_argument('-f', '--filter', type=str, nargs='+', default=None,
                                 help='Only include date/drive tracklet subdirectories, e.g. -f 1/21_f 2/24')
