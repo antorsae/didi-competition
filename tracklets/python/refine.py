@@ -122,7 +122,7 @@ for tracklet in diditracklets:
         plt.plot(line_X, z_pred, color='pink', linestyle='-', linewidth=lw, label='SVM Regressor z. Outliers: ' +  str(z_axis_diff_points))
 
         plt.legend(loc=0, fontsize='xx-small')
-        plt.savefig(tracklet.xml_path + ".png")
+        plt.savefig(os.path.join(tracklet.xml_path, "ransac.png"))
         plt.clf()
 
         #modify poses using predicted values --> not accurate

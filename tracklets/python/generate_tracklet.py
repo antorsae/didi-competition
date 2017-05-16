@@ -33,7 +33,9 @@ class Tracklet(object):
         writeln(f, '<count>%d</count>' % len(self.poses), tab_level)
         writeln(f, '<item_version>2</item_version>', tab_level)
         first_pose = True
+        frame = self.first_frame
         for p in self.poses:
+            writeln(f, '<!-- frame %d -->' % frame, tab_level)
             if first_pose:
                 writeln(f, '<item class_id="%d" tracking_level="0" version="2">' % class_id, tab_level)
                 first_pose = False
@@ -58,6 +60,7 @@ class Tracklet(object):
             writeln(f, '<amt_border_kf>-1</amt_border_kf>', tab_level)
             tab_level -= 1
             writeln(f, '</item>', tab_level)
+            frame += 1
         tab_level -= 1
         writeln(f, '</poses>', tab_level)
         writeln(f, '<finished>1</finished>', tab_level)
