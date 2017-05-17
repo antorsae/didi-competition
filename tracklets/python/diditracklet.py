@@ -135,7 +135,7 @@ class DidiTracklet(object):
         # at this point our reference model is on lidar frame, centered around x=0,y=0 and sitting at z = 0
         return reference
 
-    def _align(self, first, min_percent_first = 0.6):
+    def _align(self, first, min_percent_first = 0.6, threshold_distance = 0.3):
         if self.reference is not None:
 
             model = point_utils.ICP()
@@ -143,7 +143,7 @@ class DidiTracklet(object):
 
             t, _ = point_utils.ransac(first, self.reference[:, 0:3], model,
                                       min_percent_fist=min_percent_first,
-                                      threshold=0.3)
+                                      threshold= threshold_distance)
 
             if t is None:
                 t =  np.zeros((3))
@@ -365,7 +365,8 @@ class DidiTracklet(object):
                    search_centroid_radius = 4.,
                    look_back_last_refined_centroid=None,
                    return_aligned_clouds=False,
-                   min_percent_first=0.6):
+                   min_percent_first = 0.6,
+                   threshold_distance = 0.3):
 
         if look_back_last_refined_centroid is None:
             assert self._boxes is not None
@@ -450,7 +451,7 @@ class DidiTracklet(object):
                 obs_isolated = obs_isolated[(((obs_isolated[:, 0] - obs_cx)** 2) + (obs_isolated[:, 1] - obs_cy) ** 2) <= search_centroid_radius ** 2]
                 print("Isolated", obs_isolated.shape)
                 if (obs_isolated.shape[0] > 0):
-                    t_box = point_utils.rotZ(self._align(obs_isolated, min_percent_first = min_percent_first), self.get_yaw(frame))
+                    t_box = point_utils.rotZ(self._align(obs_isolated, min_percent_first = min_percent_first, threshold_distance = threshold_distance), self.get_yaw(frame))
 
 
             # if we didn't find it in the first place, check if we found it in the last frame and attempt to find it from there

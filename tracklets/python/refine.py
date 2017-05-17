@@ -33,6 +33,7 @@ group.add_argument('-r', '--ransac', action='store_true', help='Use ransac for t
 group.add_argument('-a', '--align', action='store_true', help='Use 3d pose alignment')
 
 parser.add_argument('-ap', '--align-percentage', type=float, action='store', default=0.6, help='Min percentage of lidar points for alignment')
+parser.add_argument('-ad', '--align-distance', type=float, action='store', default=0.3, help='Threshold distance for a point to be considered inlier during alignment')
 
 parser.add_argument('-v', '--view', action='store_true', help='View in 3d')
 
@@ -161,7 +162,8 @@ for tracklet in diditracklets:
             t_box, reference, first = tracklet.refine_box(frame,
                                                           look_back_last_refined_centroid = look_back_last_refined_centroid,
                                                           return_aligned_clouds=True,
-                                                          min_percent_first = args.align_percentage)
+                                                          min_percent_first = args.align_percentage,
+                                                          threshold_distance = args.align_distance)
             yaw = tracklet.get_yaw(frame)
             t_boxes.append(t_box)
             print("")
