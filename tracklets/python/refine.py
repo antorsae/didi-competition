@@ -58,9 +58,10 @@ for tracklet in diditracklets:
     print("")
     frames = tracklet.frames() if args.first is None else [args.first]
 
-    t_boxes = []
-    t_box = np.zeros(3)
+    t_boxes  = []
+    t_states = np.ones(len(frames), dtype=np.int32)
 
+    t_box = np.zeros(3)
     if args.ransac:
         # Fit lines for each axis using all data
         y = []
@@ -148,6 +149,10 @@ for tracklet in diditracklets:
 
         t_boxes = zip(x_axis - np.array(y)[:,0],y_axis - np.array(y)[:,1], z_axis - np.array(y)[:,2])
 
+        t_states[np.array(x_axis_diff_points)] = 0
+        t_states[np.array(y_axis_diff_points)] = 0
+
+
     elif args.align:
 
         for frame in frames:
@@ -176,11 +181,12 @@ for tracklet in diditracklets:
         h, w, l = tracklet.get_box_size()
         obs_tracklet = Tracklet(object_type='Car', l=l,w=w,h=h, first_frame=frames[0])
 
-        for frame, t_box in zip(frames, t_boxes):
+        for frame, t_box, t_state in zip(frames, t_boxes, t_states):
             pose = tracklet.get_box_pose(frame)
             pose['tx'] += t_box[0]
             pose['ty'] += t_box[1]
             pose['tz'] += t_box[2]
+            pose['status'] = t_state
             obs_tracklet.poses.append(pose)
             if args.dump:
                 print(str(pose['tx']) + "," + str(pose['ty']) + ","+ str(pose['tz']))

@@ -49,7 +49,7 @@ class Tracklet(object):
             writeln(f, '<rx>%f</rx>' % p['rx'], tab_level)
             writeln(f, '<ry>%f</ry>' % p['ry'], tab_level)
             writeln(f, '<rz>%f</rz>' % p['rz'], tab_level)
-            writeln(f, '<state>1</state>', tab_level)  # INTERP = 1
+            writeln(f, '<state>%d</state>' % p['status'], tab_level)  # INTERP = 1 , UNSET = 0
             writeln(f, '<occlusion>-1</occlusion>', tab_level) # UNSET = -1
             writeln(f, '<occlusion_kf>-1</occlusion_kf>', tab_level)
             writeln(f, '<truncation>-1</truncation>', tab_level) # UNSET = -1
