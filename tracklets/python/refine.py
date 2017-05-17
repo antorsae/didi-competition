@@ -10,20 +10,20 @@ from matplotlib import pyplot as plt
 
 parser = argparse.ArgumentParser(description='Refine tracklets by finding pose of reference object or smoothing trajectory')
 parser.add_argument('-1', '--first', type=int, action='store', help='Do one frame only, e.g. -1 87 (does frame 87)')
-parser.add_argument('-s', '--start-refining-from', type=int, action='store', default=0, help='Start from frame (defaults to 0)')
+parser.add_argument('-s', '--start-refining-from', type=int, action='store', nargs=1, default=0, help='Start from frame (defaults to 0)')
 parser.add_argument('-l', '--only-do-look-backs', action='store_true', help='Only search based on previous frame position (needs -s)')
 
 #parser.add_argument('-s', '--search-yaw', action='store_true', help='Search for yaw')
 parser.add_argument('-m', '--flip', action = 'store_true', help='Flip reference object for alignment')
-parser.add_argument('-i', '--indir', type=str, nargs='?', default='../../../../release2/Data-points-processed',
+parser.add_argument('-i', '--indir', type=str, default='../../../../release2/Data-points-processed',
                     help='Input folder where processed tracklet subdirectories are located')
 parser.add_argument('-f', '--filter', type=str, nargs='+', default=None,
                     help='Only include date/drive tracklet subdirectories, e.g. -f 1/21_f 2/24')
-parser.add_argument('-y', '--yaw', type=float, nargs='?', default=0.,
+parser.add_argument('-y', '--yaw', type=float, default=0.,
                     help='Force initial yaw correction (e.g. -y 0.88)')
-parser.add_argument('-xi', '--input-xml-filename', type=str, nargs='?', default='tracklet_labels.xml',
+parser.add_argument('-xi', '--input-xml-filename', type=str, default='tracklet_labels.xml',
                     help='input tracklet xml filename (defaults to tracklet_labels.xml)')
-parser.add_argument('-xo', '--output-xml-filename', type=str, nargs='?',
+parser.add_argument('-xo', '--output-xml-filename', type=str,
                     help='output tracklet xml filename')
 parser.add_argument('-d', '--dump', action='store_true', help='Print csv or x,y,z translations and does not ')
 
@@ -57,8 +57,8 @@ for tracklet in diditracklets:
 
     t_boxes = []
     t_box = np.zeros(3)
-    if args.ransac:
 
+    if args.ransac:
         # Fit lines for each axis using all data
         y = []
         for frame in frames:
@@ -152,11 +152,15 @@ for tracklet in diditracklets:
             if args.no_refine or frame < args.start_refining_from:
                 t_box = np.zeros(3)
             else:
-                look_back_last_refined_centroid = None
+                if (args.start_refining_from > 0) and args.only_do_look_backs:
+                    look_back_last_refined_centroid = T + t_box
+                else:
+                    look_back_last_refined_centroid = None
             t_box, reference, first = tracklet.refine_box(frame, look_back_last_refined_centroid = look_back_last_refined_centroid, return_aligned_clouds=True)
-        t_boxes.append(t_box)
-        print("")
-        T, _ = tracklet.get_box_TR(frame)
+            yaw = tracklet.get_yaw(frame)
+            t_boxes.append(t_box)
+            print("")
+            T, _ = tracklet.get_box_TR(frame)
 
     # WRITING TRACKLET
     if args.output_xml_filename is not None:
@@ -173,6 +177,7 @@ for tracklet in diditracklets:
             obs_tracklet.poses.append(pose)
             if args.dump:
                 print(str(pose['tx']) + "," + str(pose['ty']) + ","+ str(pose['tz']))
+
         collection.tracklets.append(obs_tracklet)
             # end for obs_topic loop
 
@@ -190,7 +195,7 @@ if args.view:
     w = gl.GLViewWidget()
     w.opts['distance'] = 20
     w.show()
-    w.setWindowTitle('pyqtgraph example: GLScatterPlotItem')
+    w.setWindowTitle('Reference vehicle (blue) vs. original (red) vs. aligned (white) obstacle')
 
     size=np.concatenate((
         0.01 * np.ones(reference.shape[0]),

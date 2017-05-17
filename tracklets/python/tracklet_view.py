@@ -39,13 +39,13 @@ if __name__ == '__main__':
 
         def run(self):
             parser = argparse.ArgumentParser(description='View tracklets.')
-            parser.add_argument('-i', '--indir', type=str, nargs='?', default='../../../../release2/Data-points-processed',
+            parser.add_argument('-i', '--indir', type=str, default='../../../../release2/Data-points-processed',
                                 help='Input folder where processed tracklet subdirectories are located')
             parser.add_argument('-f', '--filter', type=str, nargs='+', default=None,
                                 help='Only include date/drive tracklet subdirectories, e.g. -f 1/21_f 2/24')
-            parser.add_argument('-y', '--yaw', type=float, nargs='?', default=0.,
+            parser.add_argument('-y', '--yaw', type=float, default=0.,
                                 help='Force initial yaw correction (e.g. -y 0.88)')
-            parser.add_argument('-x', '--xml-filename', type=str, nargs='?', default='tracklet_labels.xml',
+            parser.add_argument('-xi', '--xml-filename', type=str, default='tracklet_labels.xml',
                                 help='tracklet xml filename (defaults to tracklet_labels.xml)')
             parser.add_argument('-z', '--zoom-to-box', action='store_true',
                                 help='zoom view to bounding box')
