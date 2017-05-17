@@ -110,7 +110,7 @@ class ICP(object):
         return np.abs(distances)
 
 
-def ransac(first, reference, model_class, min_samples, threshold):
+def ransac(first, reference, model_class, min_percent_fist, threshold):
     '''
     Fits a model to data with the RANSAC algorithm.
     :param data: numpy.ndarray
@@ -132,6 +132,8 @@ def ransac(first, reference, model_class, min_samples, threshold):
     :returns: tuple
         best model returned by model_class.fit, best inlier indices
     '''
+
+    min_samples = int(min_percent_fist * first.shape[0])
 
     min_reference_z =  np.amin(reference[:,2])
     max_reference_z =  np.amax(reference[:,2])
@@ -167,38 +169,45 @@ def ransac(first, reference, model_class, min_samples, threshold):
     max_d = 0.5
     clusters = scipy.cluster.hierarchy.fcluster(Z, max_d, criterion='distance')
     unique_clusters = np.unique(clusters)
+    seen_clusters_idx = []
     for cluster in unique_clusters:
         sample_idx = np.where(clusters==cluster)
+        sample_idx = sample_idx[0].tolist()
         sample  = first[sample_idx]
-        print("Trying cluster " + str(cluster) +  " / " + str(len(unique_clusters)) + " with " + str(sample_idx[0].shape[0]) + " points")
+        print("Trying cluster " + str(cluster) +  " / " + str(len(unique_clusters)) + " with " + str(len(sample_idx)) + " points")
 
         max_attempts = 10
         while max_attempts > 0:
-            sample_model = model_class.fit(sample, reference)
-            sample_model_residua = model_class.residuals(sample_model, first, reference)
-            sample_model_inliers = first_idx[sample_model_residua<threshold]
-            inlier_num = sample_model_inliers.shape[0]
-            print("Inliers: " + str(inlier_num) + " / " + str(first_points))
-            sample_model_inliers_residua = np.sum(sample_model_residua[sample_model_residua<threshold]) / inlier_num
-            if (inlier_num >= min_samples) and (sample_model_inliers_residua < best_model_inliers_residua):
-                best_inlier_num = inlier_num
-                best_inliers    = sample_model_inliers
-                best_model      = sample_model
-                best_model_inliers_residua = sample_model_inliers_residua
-            elif (inlier_num  / sample_model_inliers_residua) > second_best_score: #(inlier_num >= second_best_inlier_num) and (sample_model_inliers_residua < second_best_model_inliers_residua):
-                second_best_score      = inlier_num  / sample_model_inliers_residua
-                second_best_inlier_num = inlier_num
-                second_best_inliers    = sample_model_inliers
-                second_best_model      = sample_model
-                second_best_model_inliers_residua = sample_model_inliers_residua
+            # check if we'e already looked at this set of points, if so, skip it
+            if set(sample_idx) not in seen_clusters_idx:
+                sample_model = model_class.fit(sample, reference)
+                sample_model_residua = model_class.residuals(sample_model, first, reference)
+                sample_model_inliers = first_idx[sample_model_residua<threshold]
 
-            # keep searching if there's enough inliers and there's other inliers than those
-            # used to fit the model
-            if (inlier_num < min_samples) or np.all(np.in1d(sample_model_inliers, sample_idx)):
-                break
-            else:
-                sample_idx = sample_model_inliers
-                sample = first[sample_idx]
+                inlier_num = sample_model_inliers.shape[0]
+                print("Inliers: " + str(inlier_num) + " / " + str(first_points))
+                sample_model_inliers_residua = np.sum(sample_model_residua[sample_model_residua<threshold]) / inlier_num
+                if (inlier_num >= min_samples) and (sample_model_inliers_residua < best_model_inliers_residua):
+                    best_inlier_num = inlier_num
+                    best_inliers    = sample_model_inliers
+                    best_model      = sample_model
+                    best_model_inliers_residua = sample_model_inliers_residua
+                elif (inlier_num  / sample_model_inliers_residua) > second_best_score: #(inlier_num >= second_best_inlier_num) and (sample_model_inliers_residua < second_best_model_inliers_residua):
+                    second_best_score      = inlier_num  / sample_model_inliers_residua
+                    second_best_inlier_num = inlier_num
+                    second_best_inliers    = sample_model_inliers
+                    second_best_model      = sample_model
+                    second_best_model_inliers_residua = sample_model_inliers_residua
+
+                seen_clusters_idx.append(set(sample_idx))
+
+                # keep searching if there's enough inliers and there's other inliers than those
+                # used to fit the model
+                if (inlier_num < min_samples) or np.all(np.in1d(sample_model_inliers, sample_idx)):
+                    break
+                else:
+                    sample_idx = sample_model_inliers
+                    sample = first[sample_idx]
             max_attempts -= 1
 
     if best_model is not None:

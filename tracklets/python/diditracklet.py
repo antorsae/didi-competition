@@ -135,15 +135,15 @@ class DidiTracklet(object):
         # at this point our reference model is on lidar frame, centered around x=0,y=0 and sitting at z = 0
         return reference
 
-    def _align(self, first):
+    def _align(self, first, min_percent_first = 0.6):
         if self.reference is not None:
 
             model = point_utils.ICP()
             #first = point_utils.rotate(first, np.array([0., 0., 1.]), np.pi)
 
             t, _ = point_utils.ransac(first, self.reference[:, 0:3], model,
-                                            min_samples=int(first.shape[0] * 0.6),
-                                            threshold=0.3)
+                                      min_percent_fist=min_percent_first,
+                                      threshold=0.3)
 
             if t is None:
                 t =  np.zeros((3))
@@ -160,7 +160,7 @@ class DidiTracklet(object):
     def __include_tracklet(self, t, idx):
         return True # (t.truncs[idx] == tracklets.Truncation.IN_IMAGE) and (t.occs[idx, 0] == 0)
 
-    def _get_yaw(self, frame):
+    def get_yaw(self, frame):
         assert len(self.tracklet_data) == 1 # only one tracklet supported for now!
         for t in self.tracklet_data:
             assert frame in range(t.first_frame, t.first_frame + t.num_frames)
@@ -364,7 +364,8 @@ class DidiTracklet(object):
                    search_ground_plane_radius = 20.,
                    search_centroid_radius = 4.,
                    look_back_last_refined_centroid=None,
-                   return_aligned_clouds=False):
+                   return_aligned_clouds=False,
+                   min_percent_first=0.6):
 
         if look_back_last_refined_centroid is None:
             assert self._boxes is not None
@@ -391,6 +392,7 @@ class DidiTracklet(object):
         lidar_without_capture = self._remove_capture_vehicle(lidar)
         lidar_close = lidar_without_capture[( ((lidar_without_capture[:, 0] - cx) ** 2 + (lidar_without_capture[:, 1] - cy) ** 2) < search_ground_plane_radius ** 2) ]
 
+        obs_isolated = []
         # at a minimum we need 4 points (3 ground plane points plus 1 obstacle point)
         if (lidar_close.shape[0] >= 4):
 
@@ -432,12 +434,13 @@ class DidiTracklet(object):
                 print("ground roll | pitch " + str(roll  * 180. / np.pi) + " | " + str(pitch * 180. / np.pi))
 
                 # rotate it so that it is aligned with our reference target
-                obs_isolated = point_utils.rotate(obs_isolated, np.array([0., 0., 1.]), self._get_yaw(frame))
+                obs_isolated = point_utils.rotZ(obs_isolated, self.get_yaw(frame))
+
                 # correct ground pitch and roll
                 print("z min before correction", np.amin(obs_isolated[:,2]))
 
-                obs_isolated = point_utils.rotate(obs_isolated, np.array([0., 1., 0.]), -roll)
-                obs_isolated = point_utils.rotate(obs_isolated, np.array([1., 0., 0.]), -pitch)
+                obs_isolated = point_utils.rotate(obs_isolated, np.array([0., 1., 0.]), -roll)  # along Y axis
+                obs_isolated = point_utils.rotate(obs_isolated, np.array([1., 0., 0.]), -pitch) # along X axis
                 print("z min after correction", np.amin(obs_isolated[:,2]))
 
                 # remove stuff beyond search_centroid_radius meters of the current centroid
@@ -447,13 +450,13 @@ class DidiTracklet(object):
                 obs_isolated = obs_isolated[(((obs_isolated[:, 0] - obs_cx)** 2) + (obs_isolated[:, 1] - obs_cy) ** 2) <= search_centroid_radius ** 2]
                 print("Isolated", obs_isolated.shape)
                 if (obs_isolated.shape[0] > 0):
-                    t_box = point_utils.rotate(self._align(obs_isolated), np.array([0., 0., 1.]), - self._get_yaw(frame))
+                    t_box = point_utils.rotZ(self._align(obs_isolated, min_percent_first = min_percent_first), self.get_yaw(frame))
 
 
             # if we didn't find it in the first place, check if we found it in the last frame and attempt to find it from there
             if (t_box[0] == 0.) and (t_box[1] == 0.) and (look_back_last_refined_centroid is None) and (self._last_refined_box is not None):
                 print("Looking back")
-                t_box = self.refine_box(frame, look_back_last_refined_centroid=self._last_refined_box)
+                t_box = -self.refine_box(frame, look_back_last_refined_centroid=self._last_refined_box)
 
             new_ground_z = (-d - a * (cx+t_box[0]) - b * (cy+t_box[1])) / c
             print("original z centroid", T[2], "new ground_z", new_ground_z)
