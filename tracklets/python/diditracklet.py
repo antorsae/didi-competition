@@ -465,7 +465,12 @@ class DidiTracklet(object):
             # if we didn't find it in the first place, check if we found it in the last frame and attempt to find it from there
             if (t_box[0] == 0.) and (t_box[1] == 0.) and (look_back_last_refined_centroid is None) and (self._last_refined_box is not None):
                 print("Looking back")
-                t_box, _ = -self.refine_box(frame, look_back_last_refined_centroid=self._last_refined_box)
+                t_box, _ = self.refine_box(frame,
+                                           look_back_last_refined_centroid=self._last_refined_box,
+                                           min_percent_first=min_percent_first,
+                                           threshold_distance=threshold_distance,
+                                           )
+                t_box = -t_box
 
             new_ground_z = (-d - a * (cx+t_box[0]) - b * (cy+t_box[1])) / c
             print("original z centroid", T[2], "new ground_z", new_ground_z)
