@@ -10,11 +10,12 @@ python refine.py -xi tracklet_labels.xml -xo tracklet_labels_refined.xml -a -f 3
 python refine.py -xi tracklet_labels.xml -xo tracklet_labels_refined.xml -a -f 3/13_f ;t
 python refine.py -xi tracklet_labels.xml -xo tracklet_labels_refined.xml -a -f 3/14 -ap 0.85;t
 python refine.py -xi tracklet_labels.xml -xo tracklet_labels_refined.xml -a -f 3/15_f -ap 0.85;t
+python refine.py -xi tracklet_labels.xml -xo tracklet_labels_refined.xml -a -f 3/4 -y 0.785158138443; t
 
 
 # NEED YAW
 python refine.py  -xi tracklet_labels.xml -f 3/1  -1 0 -v -a; t
-python refine.py  -xi tracklet_labels.xml -f 3/4  -1 0 -v -a; t
+python refine.py  -xi tracklet_labels.xml -f 3/4  -1 0 -v -a -y 0.785158138443; t
 python refine.py  -xi tracklet_labels.xml -f 3/6  -1 0 -v -a; t
 python refine.py  -xi tracklet_labels.xml -f 3/7  -1 0 -v -a; t
 python refine.py  -xi tracklet_labels.xml -f 3/8  -1 0 -v -a; t

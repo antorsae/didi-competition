@@ -135,10 +135,10 @@ class DidiTracklet(object):
         # at this point our reference model is on lidar frame, centered around x=0,y=0 and sitting at z = 0
         return reference
 
-    def _align(self, first, min_percent_first = 0.6, threshold_distance = 0.3):
+    def _align(self, first, min_percent_first = 0.6, threshold_distance = 0.3, search_yaw=False):
         if self.reference is not None:
 
-            model = point_utils.ICP()
+            model = point_utils.ICP(search_yaw=search_yaw)
             #first = point_utils.rotate(first, np.array([0., 0., 1.]), np.pi)
 
             t, _ = point_utils.ransac(first, self.reference[:, 0:3], model,
@@ -366,7 +366,8 @@ class DidiTracklet(object):
                    look_back_last_refined_centroid=None,
                    return_aligned_clouds=False,
                    min_percent_first = 0.6,
-                   threshold_distance = 0.3):
+                   threshold_distance = 0.3,
+                   search_yaw=False):
 
         if look_back_last_refined_centroid is None:
             assert self._boxes is not None
@@ -381,7 +382,8 @@ class DidiTracklet(object):
         T, _ = self.get_box_TR(frame)
         print("averaged centroid", cx,cy,cz, " vs ",T[0], T[1], T[2])
 
-        t_box = np.zeros((3))
+        t_box   = np.zeros((3))
+        yaw_box = 0.
 
         if frame not in self.lidars:
             self._read_lidar(frame)
@@ -451,13 +453,24 @@ class DidiTracklet(object):
                 obs_isolated = obs_isolated[(((obs_isolated[:, 0] - obs_cx)** 2) + (obs_isolated[:, 1] - obs_cy) ** 2) <= search_centroid_radius ** 2]
                 print("Isolated", obs_isolated.shape)
                 if (obs_isolated.shape[0] > 0):
-                    t_box = point_utils.rotZ(self._align(obs_isolated, min_percent_first = min_percent_first, threshold_distance = threshold_distance), self.get_yaw(frame))
-
+                    _t_box = self._align(
+                        obs_isolated,
+                        min_percent_first = min_percent_first,
+                        threshold_distance = threshold_distance,
+                        search_yaw=search_yaw)
+                    yaw_box = _t_box[3] if search_yaw else 0.
+                    _t_box[2] = 0
+                    t_box = point_utils.rotZ(_t_box[:3], self.get_yaw(frame))
 
             # if we didn't find it in the first place, check if we found it in the last frame and attempt to find it from there
             if (t_box[0] == 0.) and (t_box[1] == 0.) and (look_back_last_refined_centroid is None) and (self._last_refined_box is not None):
                 print("Looking back")
-                t_box = -self.refine_box(frame, look_back_last_refined_centroid=self._last_refined_box)
+                t_box, _ = self.refine_box(frame,
+                                           look_back_last_refined_centroid=self._last_refined_box,
+                                           min_percent_first=min_percent_first,
+                                           threshold_distance=threshold_distance,
+                                           )
+                t_box = -t_box
 
             new_ground_z = (-d - a * (cx+t_box[0]) - b * (cy+t_box[1])) / c
             print("original z centroid", T[2], "new ground_z", new_ground_z)
@@ -472,10 +485,11 @@ class DidiTracklet(object):
                 self._last_refined_box = None
 
         print(t_box)
+        print(yaw_box)
         if return_aligned_clouds:
-            return t_box, self.reference[:, 0:3], obs_isolated
+            return t_box, yaw_box, self.reference[:, 0:3], obs_isolated
 
-        return t_box
+        return t_box, yaw_box
 
 
     # return a top view of the lidar image for frame
