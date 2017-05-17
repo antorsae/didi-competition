@@ -122,7 +122,7 @@ for tracklet in diditracklets:
         plt.plot(line_X, z_pred, color='pink', linestyle='-', linewidth=lw, label='SVM Regressor z. Outliers: ' +  str(z_axis_diff_points))
 
         plt.legend(loc=0, fontsize='xx-small')
-        plt.savefig(os.path.join(tracklet.xml_path, "ransac.png"))
+        plt.savefig(tracklet.xml_path + "/plot.png")
         plt.clf()
 
         #modify poses using predicted values --> not accurate
@@ -139,9 +139,9 @@ for tracklet in diditracklets:
         x_axis[y_axis_diff_points] = (x_axis[np.array(y_axis_diff_points) -1 ] + x_axis[np.array(y_axis_diff_points) +1 ]) / 2
         z_axis[y_axis_diff_points] = (z_axis[np.array(y_axis_diff_points) -1 ] + z_axis[np.array(y_axis_diff_points) +1 ]) / 2
 
-        z_axis[z_axis_diff_points] = (z_axis[np.array(z_axis_diff_points) -1 ] + z_axis[np.array(z_axis_diff_points) +1 ]) / 2
-        y_axis[z_axis_diff_points] = (y_axis[np.array(z_axis_diff_points) -1 ] + y_axis[np.array(z_axis_diff_points) +1 ]) / 2
-        x_axis[z_axis_diff_points] = (x_axis[np.array(z_axis_diff_points) -1 ] + x_axis[np.array(z_axis_diff_points) +1 ]) / 2
+        #z_axis[z_axis_diff_points] = (z_axis[np.array(z_axis_diff_points) -1 ] + z_axis[np.array(z_axis_diff_points) +1 ]) / 2
+        #y_axis[z_axis_diff_points] = (y_axis[np.array(z_axis_diff_points) -1 ] + y_axis[np.array(z_axis_diff_points) +1 ]) / 2
+        #x_axis[z_axis_diff_points] = (x_axis[np.array(z_axis_diff_points) -1 ] + x_axis[np.array(z_axis_diff_points) +1 ]) / 2
 
         t_boxes = zip(x_axis - np.array(y)[:,0],y_axis - np.array(y)[:,1], z_axis - np.array(y)[:,2])
 
