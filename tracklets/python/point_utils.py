@@ -96,6 +96,8 @@ class ICP(object):
     '''
     def __init__(self, search_yaw=False):
         self.search_yaw = search_yaw
+        if search_yaw:
+            print("YAW SEARCH")
 
     def fit(self, first, reference):
         _icp = icp(first, reference, self.search_yaw)

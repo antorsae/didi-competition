@@ -13,7 +13,6 @@ parser.add_argument('-1', '--first', type=int, action='store', help='Do one fram
 parser.add_argument('-s', '--start-refining-from', type=int, action='store', nargs=1, default=0, help='Start from frame (defaults to 0)')
 parser.add_argument('-l', '--only-do-look-backs', action='store_true', help='Only search based on previous frame position (needs -s)')
 
-#parser.add_argument('-s', '--search-yaw', action='store_true', help='Search for yaw')
 parser.add_argument('-m', '--flip', action = 'store_true', help='Flip reference object for alignment')
 parser.add_argument('-i', '--indir', type=str, default='../../../../release2/Data-points-processed',
                     help='Input folder where processed tracklet subdirectories are located')
@@ -34,11 +33,11 @@ group.add_argument('-a', '--align', action='store_true', help='Use 3d pose align
 
 parser.add_argument('-ap', '--align-percentage', type=float, action='store', default=0.6, help='Min percentage of lidar points for alignment')
 parser.add_argument('-ad', '--align-distance', type=float, action='store', default=0.3, help='Threshold distance for a point to be considered inlier during alignment')
+parser.add_argument('-as', '--align-yaw', action='store_true', help='Search for yaw during alignment')
 
 parser.add_argument('-v', '--view', action='store_true', help='View in 3d')
 
 args = parser.parse_args()
-#search_yaw =  args.search_yaw
 
 diditracklets = find_tracklets(args.indir,
                                filter=args.filter,
@@ -159,12 +158,16 @@ for tracklet in diditracklets:
                     look_back_last_refined_centroid = T + t_box
                 else:
                     look_back_last_refined_centroid = None
-            t_box, reference, first = tracklet.refine_box(frame,
-                                                          look_back_last_refined_centroid = look_back_last_refined_centroid,
-                                                          return_aligned_clouds=True,
-                                                          min_percent_first = args.align_percentage,
-                                                          threshold_distance = args.align_distance)
+
+            t_box, yaw_box, reference, first = tracklet.refine_box(frame,
+                                                                   look_back_last_refined_centroid = look_back_last_refined_centroid,
+                                                                   return_aligned_clouds=True,
+                                                                   min_percent_first = args.align_percentage,
+                                                                   threshold_distance = args.align_distance,
+                                                                   search_yaw = args.align_yaw )
+
             yaw = tracklet.get_yaw(frame)
+
             t_boxes.append(t_box)
             print("")
             T, _ = tracklet.get_box_TR(frame)
@@ -193,7 +196,7 @@ for tracklet in diditracklets:
 
 if args.view:
 
-    first_aligned = first + point_utils.rotZ(np.array([t_box[0], t_box[1], 0.]), -yaw)
+    first_aligned = point_utils.rotZ(first, yaw_box) + point_utils.rotZ(np.array([t_box[0], t_box[1], 0.]), -yaw)
 
     from pyqtgraph.Qt import QtCore, QtGui
     import pyqtgraph.opengl as gl
