@@ -32,6 +32,8 @@ group.add_argument('-n', '--no-refine', action='store_true', help='Do not attemp
 group.add_argument('-r', '--ransac', action='store_true', help='Use ransac for trajectory interpolation')
 group.add_argument('-a', '--align', action='store_true', help='Use 3d pose alignment')
 
+parser.add_argument('-ap', '--align-percentage', type=float, action='store', default=0.6, help='Min percentage of lidar points for alignment')
+
 parser.add_argument('-v', '--view', action='store_true', help='View in 3d')
 
 args = parser.parse_args()
@@ -156,7 +158,10 @@ for tracklet in diditracklets:
                     look_back_last_refined_centroid = T + t_box
                 else:
                     look_back_last_refined_centroid = None
-            t_box, reference, first = tracklet.refine_box(frame, look_back_last_refined_centroid = look_back_last_refined_centroid, return_aligned_clouds=True)
+            t_box, reference, first = tracklet.refine_box(frame,
+                                                          look_back_last_refined_centroid = look_back_last_refined_centroid,
+                                                          return_aligned_clouds=True,
+                                                          min_percent_first = args.align_percentage)
             yaw = tracklet.get_yaw(frame)
             t_boxes.append(t_box)
             print("")
@@ -186,7 +191,7 @@ for tracklet in diditracklets:
 
 if args.view:
 
-    first_aligned = first + np.array([t_box[0], t_box[1], 0.])
+    first_aligned = first + point_utils.rotZ(np.array([t_box[0], t_box[1], 0.]), -yaw)
 
     from pyqtgraph.Qt import QtCore, QtGui
     import pyqtgraph.opengl as gl

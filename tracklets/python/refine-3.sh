@@ -6,6 +6,10 @@ function t()
 	T=$SECONDS
 }
 python refine.py -xi tracklet_labels.xml -xo tracklet_labels_refined.xml -a -f 3/2_f ;t
+python refine.py -xi tracklet_labels.xml -xo tracklet_labels_refined.xml -a -f 3/12_f ;t
+python refine.py -xi tracklet_labels.xml -xo tracklet_labels_refined.xml -a -f 3/13_f ;t
+python refine.py -xi tracklet_labels.xml -xo tracklet_labels_refined.xml -a -f 3/14 -ap 0.8;t
+python refine.py -xi tracklet_labels.xml -xo tracklet_labels_refined.xml -a -f 3/15_f -ap 0.8;t
 
 
 # NEED YAW
