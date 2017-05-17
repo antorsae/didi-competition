@@ -74,15 +74,16 @@ for tracklet in diditracklets:
 
         X =  np.expand_dims(X, axis=1)
         model_x = linear_model.LinearRegression()
-        model_x = SVR(kernel='rbf', C=1e3, gamma=0.1)
+        model_x = SVR(kernel='rbf', C=1e4, gamma=0.01)
         model_x.fit(X, x_axis)
 
+
         model_y = linear_model.LinearRegression()
-        model_y = SVR(kernel='rbf', C=1e3, gamma=0.1)
+        model_y = SVR(kernel='rbf', C=1e4, gamma=0.01)
         model_y.fit(X, y_axis)
 
         model_z = linear_model.LinearRegression()
-        model_z = SVR(kernel='rbf', C=1e3, gamma=0.1)
+        model_z = SVR(kernel='rbf', C=1e4, gamma=0.01)
         model_z.fit(X, z_axis)
 
         # Robustly fit linear model with RANSAC algorithm
@@ -99,11 +100,11 @@ for tracklet in diditracklets:
         #line_y_ransac = model_ransac.predict(line_X[:, np.newaxis])
 
         # Compare cloud with estimated points
-        print("List cloud points differing from estimated points more than 1m ")
+        print("List cloud points differing from estimated points more than 50cm ")
         #x_axis = np.expand_dims(x_axis, axis=1)
-        x_axis_diff_points = np.where(abs(x_pred - x_axis) >= 1)
-        y_axis_diff_points = np.where(abs(y_pred - y_axis) >= 1)
-        z_axis_diff_points = np.where(abs(z_pred - z_axis) >= 1)
+        x_axis_diff_points = np.where(abs(x_pred - x_axis) >= 0.5)
+        y_axis_diff_points = np.where(abs(y_pred - y_axis) >= 0.5)
+        z_axis_diff_points = np.where(abs(z_pred - z_axis) >= 0.5)
         print(x_axis_diff_points)
         print(y_axis_diff_points)
         print(z_axis_diff_points)
@@ -113,6 +114,7 @@ for tracklet in diditracklets:
         plt.scatter(line_X[x_axis_diff_points],x_axis[x_axis_diff_points], color='red', marker='x')
 
         plt.plot(line_X, x_pred, color='green', linestyle='-', linewidth=lw, label='SVM Regressor x. Outliers: ' +  str(x_axis_diff_points))
+
 
         plt.scatter(X,y_axis, color='black', marker='.', label='centroids y')
         plt.scatter(line_X[y_axis_diff_points],y_axis[y_axis_diff_points], color='red', marker='.')
