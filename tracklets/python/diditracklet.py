@@ -96,9 +96,7 @@ class DidiTracklet(object):
 
         reference_file = os.path.join(basedir, date, 'obs.txt')
 
-        # TODO FIX THIS
         if os.path.isfile(reference_file):
-            #flip = True if os.path.isfile(os.path.join(basedir, date, drive, 'flip-reference')) else False
             if flip:
                 print("Flipping")
             else:
@@ -348,11 +346,10 @@ class DidiTracklet(object):
 
     def top_and_side_view(self, frame, with_boxes=True, lidar_override=None, SX=None, abl_overrides=None, zoom_to_box=False):
         tv = self.top_view(frame, with_boxes=with_boxes, lidar_override=lidar_override,
-                           SX=SX, abl_overrides=abl_overrides, zoom_to_box=zoom_to_box,
-                           remove_ground_plane=False, fine_tune_box = False, remove_points_below_plane = False)
+                           SX=SX, abl_overrides=abl_overrides, zoom_to_box=zoom_to_box)
         sv = self.top_view(frame, with_boxes=with_boxes, lidar_override=lidar_override,
                            SX=SX, abl_overrides=abl_overrides, zoom_to_box=zoom_to_box,
-                           side_view=True, remove_points_below_plane = False)
+                           side_view=True)
         return np.concatenate((tv, sv), axis=0)
 
     def _remove_capture_vehicle(self, lidar):
@@ -500,7 +497,7 @@ class DidiTracklet(object):
     #
     # if abl_override is provided it draws
     def top_view(self, frame, with_boxes=True, lidar_override=None, SX=None, abl_overrides=None,
-                 zoom_to_box=False, side_view=False, fine_tune_box=False, remove_ground_plane = False, remove_points_below_plane =  False):
+                 zoom_to_box=False, side_view=False):
 
         if with_boxes and zoom_to_box:
             assert self._boxes is not None
@@ -600,7 +597,14 @@ class DidiTracklet(object):
                 c = np.array([toXY(box[0, order[2]], box[1, order[2]])])
                 d = np.array([toXY(box[0, order[3]], box[1, order[3]])])
 
-                cv2.polylines(top_view, [np.int32((a, b, c, d)).reshape((-1, 1, 2))], True, (1., 0., 0.), thickness=1)
+                assert len(self.tracklet_data) == 1  # only one tracklet supported for now!
+                t = self.tracklet_data[0]
+                if t.states[frame - t.first_frame] == tracklets.STATE_UNSET:
+                    box_color = (0., 0., 1.)
+                else:
+                    box_color = (1., 0., 0.)
+
+                cv2.polylines(top_view, [np.int32((a, b, c, d)).reshape((-1, 1, 2))], True, box_color, thickness=1)
 
                 lidar_in_box  = self._lidar_in_box(frame, box)
                 for point in lidar_in_box:
@@ -608,19 +612,6 @@ class DidiTracklet(object):
                     if inRange(x, y):
                         top_view[toXY(x, y)[::-1]] = (0., 1., 1.)
 
-                if fine_tune_box:
-
-                    t_box = self.align(frame)
-
-                    max_box = box + np.expand_dims(t_box, axis=1)
-
-                    if max_box is not box:
-                        a = np.array([toXY(max_box[0, order[0]], max_box[1, order[0]])])
-                        b = np.array([toXY(max_box[0, order[1]], max_box[1, order[1]])])
-                        c = np.array([toXY(max_box[0, order[2]], max_box[1, order[2]])])
-                        d = np.array([toXY(max_box[0, order[3]], max_box[1, order[3]])])
-
-                        cv2.polylines(top_view, [np.int32((a, b, c, d)).reshape((-1, 1, 2))], True, (0., 1., 0.), thickness=1)
 
         if abl_overrides is not None:
             color = np.array([1., 0., 0.])

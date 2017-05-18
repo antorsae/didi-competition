@@ -6,7 +6,6 @@ from diditracklet import *
 from generate_tracklet import *
 from sklearn import linear_model
 from sklearn.svm import SVR
-from matplotlib import pyplot as plt
 
 parser = argparse.ArgumentParser(description='Refine tracklets by finding pose of reference object or smoothing trajectory')
 parser.add_argument('-1', '--first', type=int, action='store', help='Do one frame only, e.g. -1 87 (does frame 87)')
@@ -62,6 +61,11 @@ for tracklet in diditracklets:
 
     t_box = np.zeros(3)
     if args.ransac:
+
+        import matplotlib as mpl
+        mpl.use('Agg')
+        import matplotlib.pyplot as plt
+
         # Fit lines for each axis using all data
         y = []
         for frame in frames:
@@ -71,6 +75,8 @@ for tracklet in diditracklets:
         x_axis = np.array(y)[:,0]
         y_axis = np.array(y)[:,1]
         z_axis = np.array(y)[:,2]
+        x_d1 = np.diff(x_axis)
+        x_d2 = np.diff(x_axis, n=2)
 
         X =  np.expand_dims(X, axis=1)
         model_x = linear_model.LinearRegression()
@@ -127,7 +133,13 @@ for tracklet in diditracklets:
         plt.plot(line_X, z_pred, color='pink', linestyle='-', linewidth=lw, label='SVM Regressor z. Outliers: ' +  str(z_axis_diff_points))
 
         plt.legend(loc=0, fontsize='xx-small')
-        plt.savefig(tracklet.xml_path + "/plot.png")
+        plt.savefig(os.path.join(tracklet.xml_path , "plot.png"))
+        plt.clf()
+
+        plt.scatter(X[1:],x_d1, color='black', marker='x', label='d x')
+        plt.scatter(X[2:],x_d2, color='red', marker='*', label='d2 x')
+
+        plt.savefig(os.path.join(tracklet.xml_path , "plotdiff.png"))
         plt.clf()
 
         #modify poses using predicted values --> not accurate

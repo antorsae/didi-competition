@@ -24,7 +24,7 @@ python refine.py -xi tracklet_labels.xml -xo tracklet_labels_refined.xml -a -f 3
 # ok needs ransac
 python refine.py -xi tracklet_labels.xml -xo tracklet_labels_refined.xml -a -f 3/4 -y 0.801401903504; t
 
-##ok
+#ok
 python refine.py -xi tracklet_labels.xml -xo tracklet_labels_refined.xml -a -f 3/1 -y 0.95; t
 
 # ok
