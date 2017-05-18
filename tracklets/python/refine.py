@@ -151,7 +151,6 @@ for tracklet in diditracklets:
         t_states[np.array(x_axis_diff_points)] = 0
         t_states[np.array(y_axis_diff_points)] = 0
 
-
     elif args.align:
 
         for frame in frames:
@@ -195,14 +194,14 @@ for tracklet in diditracklets:
                 print(str(pose['tx']) + "," + str(pose['ty']) + ","+ str(pose['tz']))
 
         collection.tracklets.append(obs_tracklet)
-            # end for obs_topic loop
+        # end for obs_topic loop
 
         tracklet_path = os.path.join(tracklet.xml_path , args.output_xml_filename)
         collection.write_xml(tracklet_path)
 
 if args.view:
 
-    first_aligned = point_utils.rotZ(first, yaw_box) + point_utils.rotZ(np.array([t_box[0], t_box[1], 0.]), -yaw)
+    first_aligned = point_utils.rotZ(first, yaw_box) - point_utils.rotZ(np.array([t_box[0], t_box[1], 0.]), -yaw)
 
     from pyqtgraph.Qt import QtCore, QtGui
     import pyqtgraph.opengl as gl

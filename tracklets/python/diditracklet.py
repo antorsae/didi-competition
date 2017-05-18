@@ -460,7 +460,7 @@ class DidiTracklet(object):
                         search_yaw=search_yaw)
                     yaw_box = _t_box[3] if search_yaw else 0.
                     _t_box[2] = 0
-                    t_box = point_utils.rotZ(_t_box[:3], self.get_yaw(frame))
+                    t_box = -point_utils.rotZ(_t_box[:3], -self.get_yaw(frame))
 
             # if we didn't find it in the first place, check if we found it in the last frame and attempt to find it from there
             if (t_box[0] == 0.) and (t_box[1] == 0.) and (look_back_last_refined_centroid is None) and (self._last_refined_box is not None):
