@@ -166,6 +166,11 @@ class DidiTracklet(object):
             yaw = t.rots[idx][2]
         return yaw
 
+    def get_state(self, frame):
+        assert len(self.tracklet_data) == 1  # only one tracklet supported for now!
+        t = self.tracklet_data[0]
+        return t.states[frame - t.first_frame]
+
     def get_box_first_frame(self, box=0):
         assert len(self.tracklet_data) == 1 # only one tracklet supported for now!
         return self.tracklet_data[box].first_frame

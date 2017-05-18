@@ -92,6 +92,8 @@ for tracklet in diditracklets:
         model_z = SVR(kernel='rbf', C=1e4, gamma=0.01)
         model_z.fit(X, z_axis)
 
+
+
         # Robustly fit linear model with RANSAC algorithm
         #model_ransac = linear_model.RANSACRegressor(SVR(kernel='rbf', C=1e3, gamma=0.1))
         #model_ransac.fit(X, x_axis)
@@ -103,14 +105,26 @@ for tracklet in diditracklets:
         x_pred = model_x.predict(line_X[:, np.newaxis])
         y_pred = model_y.predict(line_X[:, np.newaxis])
         z_pred = model_z.predict(line_X[:, np.newaxis])
+
+        import scipy.spatial
+        print(np.array(y)[:,:2].shape, np.squeeze(np.dstack((x_pred, y_pred)), axis=0).shape)
+        _xy_cosdis = scipy.spatial.distance.cdist(np.array(y)[:,:2], np.squeeze(np.dstack((x_pred, y_pred)), axis=0), 'euclidean')
+        xy_cosdis = np.empty(_xy_cosdis.shape[0])
+        for i in range(_xy_cosdis.shape[0]):
+            xy_cosdis[i] = _xy_cosdis[i,i]
+        print(xy_cosdis)
+
         #line_y_ransac = model_ransac.predict(line_X[:, np.newaxis])
 
         # Compare cloud with estimated points
         print("List cloud points differing from estimated points more than 50cm ")
         #x_axis = np.expand_dims(x_axis, axis=1)
+
+        diff_points = np.where(xy_cosdis >= 0.5)
         x_axis_diff_points = np.where(abs(x_pred - x_axis) >= 0.5)
         y_axis_diff_points = np.where(abs(y_pred - y_axis) >= 0.5)
         z_axis_diff_points = np.where(abs(z_pred - z_axis) >= 0.5)
+        print(diff_points)
         print(x_axis_diff_points)
         print(y_axis_diff_points)
         print(z_axis_diff_points)
@@ -133,6 +147,10 @@ for tracklet in diditracklets:
         plt.plot(line_X, z_pred, color='pink', linestyle='-', linewidth=lw, label='SVM Regressor z. Outliers: ' +  str(z_axis_diff_points))
 
         plt.legend(loc=0, fontsize='xx-small')
+
+        for xc in diff_points[0]:
+            plt.axvline(x=line_X[xc], color='k', linestyle='--')
+
         plt.savefig(os.path.join(tracklet.xml_path , "plot.png"))
         plt.clf()
 
@@ -148,22 +166,13 @@ for tracklet in diditracklets:
         #z_axis[z_axis_diff_points] = z_pred[z_axis_diff_points]
 
         #modify poses for outliers using the neighbours mean value in all axis
-        x_axis[x_axis_diff_points] = (x_axis[np.array(x_axis_diff_points) -1 ] + x_axis[np.array(x_axis_diff_points) +1 ]) / 2
-        y_axis[x_axis_diff_points] = (y_axis[np.array(x_axis_diff_points) -1 ] + y_axis[np.array(x_axis_diff_points) +1 ]) / 2
-        z_axis[x_axis_diff_points] = (z_axis[np.array(x_axis_diff_points) -1 ] + z_axis[np.array(x_axis_diff_points) +1 ]) / 2
-
-        y_axis[y_axis_diff_points] = (y_axis[np.array(y_axis_diff_points) -1 ] + y_axis[np.array(y_axis_diff_points) +1 ]) / 2
-        x_axis[y_axis_diff_points] = (x_axis[np.array(y_axis_diff_points) -1 ] + x_axis[np.array(y_axis_diff_points) +1 ]) / 2
-        z_axis[y_axis_diff_points] = (z_axis[np.array(y_axis_diff_points) -1 ] + z_axis[np.array(y_axis_diff_points) +1 ]) / 2
-
-        #z_axis[z_axis_diff_points] = (z_axis[np.array(z_axis_diff_points) -1 ] + z_axis[np.array(z_axis_diff_points) +1 ]) / 2
-        #y_axis[z_axis_diff_points] = (y_axis[np.array(z_axis_diff_points) -1 ] + y_axis[np.array(z_axis_diff_points) +1 ]) / 2
-        #x_axis[z_axis_diff_points] = (x_axis[np.array(z_axis_diff_points) -1 ] + x_axis[np.array(z_axis_diff_points) +1 ]) / 2
+        x_axis[diff_points] = (x_axis[np.array(diff_points) -1 ] + x_axis[np.array(diff_points) +1 ]) / 2
+        y_axis[diff_points] = (y_axis[np.array(diff_points) -1 ] + y_axis[np.array(diff_points) +1 ]) / 2
+        z_axis[diff_points] = (z_axis[np.array(diff_points) -1 ] + z_axis[np.array(diff_points) +1 ]) / 2
 
         t_boxes = zip(x_axis - np.array(y)[:,0],y_axis - np.array(y)[:,1], z_axis - np.array(y)[:,2])
 
-        t_states[np.array(x_axis_diff_points)] = 0
-        t_states[np.array(y_axis_diff_points)] = 0
+        t_states[np.array(diff_points)] = 0
 
     elif args.align:
 
