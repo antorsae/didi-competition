@@ -268,7 +268,8 @@ class DidiTracklet(object):
         return
 
     # given lidar points, subsample POINTS by removing points from voxels with highest density
-    def _lidar_subsample(self, lidar, POINTS):
+    @staticmethod
+    def _lidar_subsample(lidar, POINTS):
         # X_RANGE = (  0., 70.)
         # Y_RANGE = (-40., 40.)
         # Z_RANGE = ( -2.,  2.)
@@ -316,13 +317,14 @@ class DidiTracklet(object):
                 i += v
         return subsampled
 
-    def get_lidar(self, frame, num_points = None, remove_capture_vehicle=True, max_distance = None):
-        if frame not in self.lidars:
-            self._read_lidar(frame)
-            assert frame in self.lidars
-        lidar = self.lidars[frame]
+    @staticmethod
+    def _remove_capture_vehicle(lidar):
+        return lidar[~ ((np.abs(lidar[:, 0]) < 2.6) & (np.abs(lidar[:, 1]) < 1.))]
+
+    @staticmethod
+    def filter_lidar(lidar, num_points = None, remove_capture_vehicle=True, max_distance = None):
         if remove_capture_vehicle:
-            lidar = self._remove_capture_vehicle(lidar)
+            lidar = DidiTracklet._remove_capture_vehicle(lidar)
         if max_distance is not None:
             lidar = lidar[(lidar[:,0] ** 2 + lidar[:,1] ** 2) <= (max_distance **2)]
         if num_points is not None:
@@ -330,8 +332,15 @@ class DidiTracklet(object):
             if num_points > lidar_size:
                 lidar = np.concatenate((lidar, lidar[np.random.choice(lidar.shape[0], size=num_points - lidar_size, replace=True)]), axis=0)
             elif num_points < lidar_size:
-                lidar = self._lidar_subsample(lidar, num_points)
+                lidar = DidiTracklet._lidar_subsample(lidar, num_points)
         return lidar
+
+    def get_lidar(self, frame, num_points = None, remove_capture_vehicle=True, max_distance = None):
+        if frame not in self.lidars:
+            self._read_lidar(frame)
+            assert frame in self.lidars
+        lidar = self.lidars[frame]
+        return self.filter_lidar(lidar, num_points = num_points, remove_capture_vehicle=remove_capture_vehicle, max_distance = max_distance)
 
     def get_box_centroid(self, frame):
         assert self._boxes is not None
@@ -356,9 +365,6 @@ class DidiTracklet(object):
                            SX=SX, abl_overrides=abl_overrides, zoom_to_box=zoom_to_box,
                            side_view=True)
         return np.concatenate((tv, sv), axis=0)
-
-    def _remove_capture_vehicle(self, lidar):
-        return lidar[~ ((np.abs(lidar[:, 0]) < 2.6) & (np.abs(lidar[:, 1]) < 1.))]
 
     def refine_box(self,
                    frame,
@@ -394,7 +400,7 @@ class DidiTracklet(object):
 
         # get points close to the obstacle (d_range meters) removing capture car (2.6m x, 1m y) just in case
         # this will be handy when we find the ground plane around the obstacle later
-        lidar_without_capture = self._remove_capture_vehicle(lidar)
+        lidar_without_capture = DidiTracklet._remove_capture_vehicle(lidar)
         lidar_close = lidar_without_capture[( ((lidar_without_capture[:, 0] - cx) ** 2 + (lidar_without_capture[:, 1] - cy) ** 2) < search_ground_plane_radius ** 2) ]
 
         obs_isolated = []
@@ -551,7 +557,7 @@ class DidiTracklet(object):
                 assert frame in self.lidars
             lidar = self.lidars[frame]
 
-        lidar = self._remove_capture_vehicle(lidar)
+        lidar = DidiTracklet._remove_capture_vehicle(lidar)
 
         if side_view:
             lidar = lidar[(lidar[:,1] >= -1.) & (lidar[:,1] <= 1.)]
