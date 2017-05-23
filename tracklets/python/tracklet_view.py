@@ -49,6 +49,8 @@ if __name__ == '__main__':
                                 help='tracklet xml filename (defaults to tracklet_labels.xml)')
             parser.add_argument('-z', '--zoom-to-box', action='store_true',
                                 help='zoom view to bounding box')
+            parser.add_argument('-r', '--randomize', action='store_true',
+                                help='random perturbation (augmentation)')
             args = parser.parse_args()
 
             diditracklets = find_tracklets(args.indir, args.filter, args.yaw, args.xml_filename)
@@ -58,7 +60,7 @@ if __name__ == '__main__':
 
                 for frame in tracklet.frames():
 
-                    tv = tracklet.top_and_side_view(frame, with_boxes=True, zoom_to_box=args.zoom_to_box, SX=400)
+                    tv = tracklet.top_view(frame, with_boxes=True, zoom_to_box=args.zoom_to_box, SX=400, randomize=args.randomize)
                     if tvv is None:
                         tvv = np.expand_dims(tv, axis=0)
                     else:

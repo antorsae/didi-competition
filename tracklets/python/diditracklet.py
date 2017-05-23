@@ -13,6 +13,7 @@ import pcl
 import os
 import sys
 import re
+import time
 
 M = 10
 MIN_HEIGHT = -2.  # from camera (i.e.  -2-1.65 =  3.65m above floor)
@@ -322,25 +323,34 @@ class DidiTracklet(object):
         return lidar[~ ((np.abs(lidar[:, 0]) < 2.6) & (np.abs(lidar[:, 1]) < 1.))]
 
     @staticmethod
+    def resample_lidar(lidar, num_points):
+        lidar_size = lidar.shape[0]
+        if num_points > lidar_size:
+            lidar = np.concatenate(
+                (lidar, lidar[np.random.choice(lidar.shape[0], size=num_points - lidar_size, replace=True)]), axis=0)
+        elif num_points < lidar_size:
+            lidar = DidiTracklet._lidar_subsample(lidar, num_points)
+        return lidar
+
+    @staticmethod
     def filter_lidar(lidar, num_points = None, remove_capture_vehicle=True, max_distance = None):
         if remove_capture_vehicle:
             lidar = DidiTracklet._remove_capture_vehicle(lidar)
+
         if max_distance is not None:
             lidar = lidar[(lidar[:,0] ** 2 + lidar[:,1] ** 2) <= (max_distance **2)]
+
         if num_points is not None:
-            lidar_size = lidar.shape[0]
-            if num_points > lidar_size:
-                lidar = np.concatenate((lidar, lidar[np.random.choice(lidar.shape[0], size=num_points - lidar_size, replace=True)]), axis=0)
-            elif num_points < lidar_size:
-                lidar = DidiTracklet._lidar_subsample(lidar, num_points)
+            lidar = DidiTracklet.resample_lidar(lidar, num_points)
+
         return lidar
 
-    def get_lidar(self, frame, num_points = None, remove_capture_vehicle=True, max_distance = None):
+    def get_lidar(self, frame, num_points = None, remove_capture_vehicle=True, max_distance = None, print_time = False):
         if frame not in self.lidars:
             self._read_lidar(frame)
             assert frame in self.lidars
         lidar = self.lidars[frame]
-        return self.filter_lidar(lidar, num_points = num_points, remove_capture_vehicle=remove_capture_vehicle, max_distance = max_distance)
+        return self.filter_lidar(lidar, num_points = num_points, remove_capture_vehicle=remove_capture_vehicle, max_distance = max_distance, print_time = print_time)
 
     def get_box_centroid(self, frame):
         assert self._boxes is not None
@@ -360,9 +370,9 @@ class DidiTracklet(object):
 
     def top_and_side_view(self, frame, with_boxes=True, lidar_override=None, SX=None, abl_overrides=None, zoom_to_box=False):
         tv = self.top_view(frame, with_boxes=with_boxes, lidar_override=lidar_override,
-                           SX=SX, abl_overrides=abl_overrides, zoom_to_box=zoom_to_box)
+                           SX=SX, zoom_to_box=zoom_to_box)
         sv = self.top_view(frame, with_boxes=with_boxes, lidar_override=lidar_override,
-                           SX=SX, abl_overrides=abl_overrides, zoom_to_box=zoom_to_box,
+                           SX=SX, zoom_to_box=zoom_to_box,
                            side_view=True)
         return np.concatenate((tv, sv), axis=0)
 
@@ -506,9 +516,8 @@ class DidiTracklet(object):
     # SX are horizontal pixels of resulting image (vertical pixels maintain AR),
     # useful if you want to stack lidar below or above camera image
     #
-    # if abl_override is provided it draws
-    def top_view(self, frame, with_boxes=True, lidar_override=None, SX=None, abl_overrides=None,
-                 zoom_to_box=False, side_view=False):
+    def top_view(self, frame, with_boxes=True, lidar_override=None, SX=None,
+                 zoom_to_box=False, side_view=False, randomize=False):
 
         if with_boxes and zoom_to_box:
             assert self._boxes is not None
@@ -558,6 +567,15 @@ class DidiTracklet(object):
             lidar = self.lidars[frame]
 
         lidar = DidiTracklet._remove_capture_vehicle(lidar)
+
+        if randomize:
+            centroid = self.get_box_centroid(frame)
+
+            perturbation = (np.random.random_sample((lidar.shape[0], 5)) * 2. - np.array([1., 1., 1., 1., 1.])) * \
+                           np.expand_dims(np.clip(
+                               np.sqrt(((lidar[:, 0] - centroid[0]) ** 2) + ((lidar[:, 1] - centroid[1]) ** 2)) - 5.,
+                               0., 20.), axis=1) * np.array([[2. / 20., 2. / 20., 0.1 / 20., 4. / 20., 0.]])
+            lidar += perturbation
 
         if side_view:
             lidar = lidar[(lidar[:,1] >= -1.) & (lidar[:,1] <= 1.)]
@@ -622,31 +640,6 @@ class DidiTracklet(object):
                     x, y = point[0], point[1]
                     if inRange(x, y):
                         top_view[toXY(x, y)[::-1]] = (0., 1., 1.)
-
-
-        if abl_overrides is not None:
-            color = np.array([1., 0., 0.])
-            print("abl_overrides", abl_overrides)
-            for i, abl_override in enumerate(abl_overrides):
-                # A B are lidar bottom box corners
-                A = np.array([abl_override[0], abl_override[1]])
-                B = np.array([abl_override[2], abl_override[3]])
-                l = abl_override[4]
-
-                # given A,B and l, compute C and D by rotating -90 l * AB/|AB| and adding to B
-                rot90 = np.array([[0, 1], [-1, 0]])
-                AB = B - A
-                ABn = np.linalg.norm(AB)
-                C = B + l * np.dot(AB, rot90) / ABn
-                D = C - AB
-
-                c = toXY(C[0], C[1])
-                d = toXY(D[0], D[1])
-                a = toXY(abl_override[0], abl_override[1])
-                b = toXY(abl_override[2], abl_override[3])
-
-                cv2.polylines(top_view, [np.int32((a, b, c, d)).reshape((-1, 1, 2))], True, np.roll(color, i),
-                              thickness=1)
 
         return top_view
 
