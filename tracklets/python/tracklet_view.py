@@ -51,6 +51,9 @@ if __name__ == '__main__':
                                 help='zoom view to bounding box')
             parser.add_argument('-r', '--randomize', action='store_true',
                                 help='random perturbation (augmentation)')
+            parser.add_argument('-1', '--first', type=int, action='store',
+                                help='View one frame only, e.g. -1 87 (views frame 87)')
+
             args = parser.parse_args()
 
             diditracklets = find_tracklets(args.indir, args.filter, args.yaw, args.xml_filename)
@@ -58,7 +61,9 @@ if __name__ == '__main__':
             for tracklet in diditracklets:
                 tvv = None
 
-                for frame in tracklet.frames():
+                frames = tracklet.frames() if args.first is None else [args.first]
+
+                for frame in frames:
 
                     tv = tracklet.top_view(frame, with_boxes=True, zoom_to_box=args.zoom_to_box, SX=400, randomize=args.randomize)
                     if tvv is None:
