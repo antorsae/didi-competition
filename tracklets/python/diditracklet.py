@@ -346,7 +346,7 @@ class DidiTracklet(object):
 
         return lidar
 
-    def get_lidar_rings(self, frame, rings, points_per_ring, pad, diff=False, rotate=0.):
+    def get_lidar_rings(self, frame, rings, points_per_ring, pad, rotate=0., clip=None):
         if frame not in self.lidars:
             self._read_lidar(frame)
             assert frame in self.lidars
@@ -355,23 +355,23 @@ class DidiTracklet(object):
         if rotate != 0.:
             lidar = point_utils.rotZ(lidar, rotate)
 
-        lidar_d_i = np.zeros((len(rings), points_per_ring, 2))
+        lidar_d_i = np.empty((len(rings), points_per_ring, 2), dtype=np.float32)
         PAD = pad # half of receptive field
         for i in rings:
             l  = lidar[lidar[:,4] == i]
             lp = l.shape[0]
             #assert  lp<= (points_per_ring + PAD *2)
 
-            _r = np.arctan2(l[:, 1], l[:, 0])  # y/x
-            _d = np.linalg.norm(l[:, :3], axis=1)  # total distance
-            _i = l[:,3]
+            _r  = np.arctan2(l[:, 1], l[:, 0])  # y/x
+            _d  = np.linalg.norm(l[:, :3], axis=1)  # total distance
+            _i  = l[:,3]
             __d = scipy.interpolate.interp1d(_r, _d, fill_value='extrapolate', kind='nearest')
             __i = scipy.interpolate.interp1d(_r, _i, fill_value='extrapolate', kind='nearest')
 
             _int_d = __d(np.linspace(-np.pi, (points_per_ring - 1) * np.pi / points_per_ring, num=points_per_ring))
-            if diff:
-                _int_d[:points_per_ring-1] = np.clip(np.diff(_int_d), -0.5,0.5)
-                _int_d[points_per_ring -1] = 0.
+            if clip is not None:
+                np.clip(_int_d, clip[0], clip[1], out=_int_d)
+                #print(np.amax(_int_d))
             _int_i = __i(np.linspace(-np.pi, (points_per_ring - 1) * np.pi / points_per_ring, num=points_per_ring))
 
             lidar_d_i[i-rings[0]] = np.vstack((_int_d, _int_i)).T
@@ -446,11 +446,11 @@ class DidiTracklet(object):
         lidar = self.lidars[frame]
         return len(self.__lidar_in_box(lidar, box, ignore_z=ignore_z))
 
-    def top_and_side_view(self, frame, with_boxes=True, lidar_override=None, SX=None, abl_overrides=None, zoom_to_box=False):
+    def top_and_side_view(self, frame, with_boxes=True, lidar_override=None, SX=None, abl_overrides=None, zoom_to_box=False, distance=50.):
         tv = self.top_view(frame, with_boxes=with_boxes, lidar_override=lidar_override,
-                           SX=SX, zoom_to_box=zoom_to_box)
+                           SX=SX, zoom_to_box=zoom_to_box, distance=distance)
         sv = self.top_view(frame, with_boxes=with_boxes, lidar_override=lidar_override,
-                           SX=SX, zoom_to_box=zoom_to_box,
+                           SX=SX, zoom_to_box=zoom_to_box, distance=distance,
                            side_view=True)
         return np.concatenate((tv, sv), axis=0)
 
@@ -595,7 +595,7 @@ class DidiTracklet(object):
     # useful if you want to stack lidar below or above camera image
     #
     def top_view(self, frame, with_boxes=True, lidar_override=None, SX=None,
-                 zoom_to_box=False, side_view=False, randomize=False):
+                 zoom_to_box=False, side_view=False, randomize=False, distance=50., rings=None):
 
         if with_boxes and zoom_to_box:
             assert self._boxes is not None
@@ -607,8 +607,8 @@ class DidiTracklet(object):
         else:
             cx = 0.
             cy = 0.
-            X_SPAN = 110.
-            Y_SPAN = 110.
+            X_SPAN = distance*2.
+            Y_SPAN = distance*2.
 
         X_RANGE = (cx - X_SPAN / 2., cx + X_SPAN / 2.)
         Y_RANGE = (cy - Y_SPAN / 2., cy + Y_SPAN / 2.)
@@ -643,6 +643,8 @@ class DidiTracklet(object):
                 self._read_lidar(frame)
                 assert frame in self.lidars
             lidar = self.lidars[frame]
+            if rings is not None:
+                lidar = lidar[np.in1d(lidar[:,4],np.array(rings, dtype=np.float32))]
 
         #lidar = self._alias_lidar_rings(frame, 32, 2048)
 

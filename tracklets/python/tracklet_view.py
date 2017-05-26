@@ -53,6 +53,9 @@ if __name__ == '__main__':
                                 help='random perturbation (augmentation)')
             parser.add_argument('-1', '--first', type=int, action='store',
                                 help='View one frame only, e.g. -1 87 (views frame 87)')
+            parser.add_argument('-d', '--distance', default=50., type=float, action='store',
+                                help='Distance ')
+            parser.add_argument('-or', '--only-rings', nargs='+', action='store', help='Only include rings, e.g. -or 10 11 12 13')
 
             args = parser.parse_args()
 
@@ -65,7 +68,13 @@ if __name__ == '__main__':
 
                 for frame in frames:
 
-                    tv = tracklet.top_view(frame, with_boxes=True, zoom_to_box=args.zoom_to_box, SX=400, randomize=args.randomize)
+                    tv = tracklet.top_view(frame,
+                                           with_boxes=True,
+                                           zoom_to_box=args.zoom_to_box,
+                                           SX=400,
+                                           randomize=args.randomize,
+                                           distance = args.distance,
+                                           rings = args.only_rings)
                     if tvv is None:
                         tvv = np.expand_dims(tv, axis=0)
                     else:
