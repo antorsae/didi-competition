@@ -423,12 +423,12 @@ class DidiTracklet(object):
         return aliased_lidar
 
 
-    def get_lidar(self, frame, num_points = None, remove_capture_vehicle=True, max_distance = None, print_time = False):
+    def get_lidar(self, frame, num_points = None, remove_capture_vehicle=True, max_distance = None):
         if frame not in self.lidars:
             self._read_lidar(frame)
             assert frame in self.lidars
         lidar = self.lidars[frame]
-        return self.filter_lidar(lidar, num_points = num_points, remove_capture_vehicle=remove_capture_vehicle, max_distance = max_distance, print_time = print_time)
+        return self.filter_lidar(lidar, num_points = num_points, remove_capture_vehicle=remove_capture_vehicle, max_distance = max_distance)
 
     def get_box_centroid(self, frame):
         assert self._boxes is not None
