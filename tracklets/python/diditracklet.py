@@ -284,14 +284,47 @@ class DidiTracklet(object):
         bins, edges = np.histogramdd(lidar[:, 0:3], bins=(NX, NY, NZ))
 
         bin_target = np.array(bins, dtype=np.int32)
-        # inefficient but effective, TODO optimize (easy)
-        for i in range(np.sum(bin_target) - POINTS):
-            bin_target[np.unravel_index(bin_target.argmax(), bin_target.shape)] -= 1
+        subsample_time_start = time.time()
+
+        bin_target_flat = bin_target.flatten()
+        remaining = np.sum(bin_target) - POINTS
+
+        bin_target_idx_sorted = np.argsort(bin_target_flat)
+        maxi = bin_target_idx_sorted.shape[0] - 1
+        i = maxi
+        while (remaining > 0) and (i >= 0):
+            maxt = bin_target_flat[bin_target_idx_sorted[maxi]]
+            while bin_target_flat[bin_target_idx_sorted[i]] >= maxt:
+                i -= 1
+            available_to_substract = bin_target_flat[bin_target_idx_sorted[i+1:maxi+1]] - bin_target_flat[bin_target_idx_sorted[i]]
+            total_available_to_substract = np.sum(available_to_substract)
+            ii = i
+            zz = 0
+            if (total_available_to_substract < remaining):
+                bin_target_flat[bin_target_idx_sorted[ii + 1:]] -= available_to_substract
+                remaining -= total_available_to_substract
+            else:
+                while (total_available_to_substract > 0) and (remaining > 0):
+                    to_substract = min(remaining, available_to_substract[zz])
+                    bin_target_flat[bin_target_idx_sorted[ii+1]] -= to_substract
+                    total_available_to_substract -= to_substract
+                    remaining -= to_substract
+                    ii += 1
+                    zz += 1
+                #print(bin_target_flat)
+        #print(remaining)
+
+        bin_target = bin_target_flat.reshape(bin_target.shape)
+        #print("bin_target", bin_target)
+        #print("_bin_target", _bin_target)
+
+        subsample_time_end = time.time()
+        #print 'Total subsample inside time: %0.3f ms' % ((subsample_time_end - subsample_time_start) * 1000.0)
 
         target_n = np.sum(bin_target)
-        assert target_n >= POINTS
+        assert target_n == POINTS
 
-        subsampled = np.empty_like(lidar[:target_n, :])
+        subsampled = np.empty((POINTS, lidar.shape[1]))
 
         i = 0
         nx, ny, nz = bin_target.shape
@@ -327,10 +360,25 @@ class DidiTracklet(object):
     def resample_lidar(lidar, num_points):
         lidar_size = lidar.shape[0]
         if num_points > lidar_size:
-            lidar = np.concatenate(
-                (lidar, lidar[np.random.choice(lidar.shape[0], size=num_points - lidar_size, replace=True)]), axis=0)
+            upsample_time_start = time.time()
+
+            #lidar = np.concatenate((lidar, lidar[np.random.choice(lidar.shape[0], size=num_points - lidar_size, replace=True)]), axis = 0)
+            if True:
+                # tile existing array and pad it with missing slice
+                reps = num_points // lidar_size - 1
+                if reps > 0:
+                    lidar = np.tile(lidar, (reps + 1, 1))
+                missing = num_points - lidar.shape[0]
+                lidar = np.concatenate((lidar, lidar[:missing]), axis=0)
+                upsample_time_end = time.time()
+                #print 'Total upsample time: %0.3f ms' % ((upsample_time_end - upsample_time_start) * 1000.0)
+
         elif num_points < lidar_size:
+            subsample_time_start = time.time()
             lidar = DidiTracklet._lidar_subsample(lidar, num_points)
+            subsample_time_end = time.time()
+            print 'Total subsample time: %0.3f ms' % ((subsample_time_end - subsample_time_start) * 1000.0)
+
         return lidar
 
     @staticmethod
@@ -595,7 +643,7 @@ class DidiTracklet(object):
     # useful if you want to stack lidar below or above camera image
     #
     def top_view(self, frame, with_boxes=True, lidar_override=None, SX=None,
-                 zoom_to_box=False, side_view=False, randomize=False, distance=50., rings=None):
+                 zoom_to_box=False, side_view=False, randomize=False, distance=50., rings=None, num_points=None):
 
         if with_boxes and zoom_to_box:
             assert self._boxes is not None
@@ -645,10 +693,8 @@ class DidiTracklet(object):
             lidar = self.lidars[frame]
             if rings is not None:
                 lidar = lidar[np.in1d(lidar[:,4],np.array(rings, dtype=np.float32))]
-
-        #lidar = self._alias_lidar_rings(frame, 32, 2048)
-
-        #lidar = DidiTracklet._remove_capture_vehicle(lidar)
+            if num_points is not None:
+                lidar = DidiTracklet.resample_lidar(lidar, num_points)
 
         if randomize:
             centroid = self.get_box_centroid(frame)

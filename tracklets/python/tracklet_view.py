@@ -53,6 +53,8 @@ if __name__ == '__main__':
                                 help='random perturbation (augmentation)')
             parser.add_argument('-1', '--first', type=int, action='store',
                                 help='View one frame only, e.g. -1 87 (views frame 87)')
+            parser.add_argument('-n', '--num-points', type=int, action='store',
+                                help='Resample to number of points, e.g. -n 27000')
             parser.add_argument('-d', '--distance', default=50., type=float, action='store',
                                 help='Distance ')
             parser.add_argument('-or', '--only-rings', nargs='+', action='store', help='Only include rings, e.g. -or 10 11 12 13')
@@ -74,7 +76,8 @@ if __name__ == '__main__':
                                            SX=400,
                                            randomize=args.randomize,
                                            distance = args.distance,
-                                           rings = args.only_rings)
+                                           rings = args.only_rings,
+                                           num_points = args.num_points)
                     if tvv is None:
                         tvv = np.expand_dims(tv, axis=0)
                     else:
