@@ -327,29 +327,38 @@ class DidiTracklet(object):
         subsampled = np.empty((POINTS, lidar.shape[1]))
 
         i = 0
+        j = maxi
         nx, ny, nz = bin_target.shape
-        for (x, y, z), v in np.ndenumerate(bin_target):
-            if v > 0:
-                XX = edges[0][x:x + 2]
-                YY = edges[1][y:y + 2]
-                ZZ = edges[2][z:z + 2]
-                # edge cases needed b/c histogramdd includes righest-most edge in bin
-                if x < (nx - 1):
-                    sublidar = lidar[(lidar[:, 0] >= XX[0]) & (lidar[:, 0] < XX[1])]
-                else:
-                    sublidar = lidar[(lidar[:, 0] >= XX[0]) & (lidar[:, 0] <= XX[1])]
-                if y < (ny - 1):
-                    sublidar = sublidar[(sublidar[:, 1] >= YY[0]) & (sublidar[:, 1] < YY[1])]
-                else:
-                    sublidar = sublidar[(sublidar[:, 1] >= YY[0]) & (sublidar[:, 1] <= YY[1])]
-                if z < (nz - 1):
-                    sublidar = sublidar[(sublidar[:, 2] >= ZZ[0]) & (sublidar[:, 2] < ZZ[1])]
-                else:
-                    sublidar = sublidar[(sublidar[:, 2] >= ZZ[0]) & (sublidar[:, 2] <= ZZ[1])]
-                assert sublidar.shape[0] == bins[x, y, z]
-                assert sublidar.shape[0] >= v
-                subsampled[i:(i + v)] = sublidar[np.random.choice(range(sublidar.shape[0]), v, replace=False)]
-                i += v
+#        for (x, y, z), v in np.ndenumerate(bin_target):
+ #           if v > 0:
+        while (bin_target_flat[bin_target_idx_sorted[j]] > 0):
+            x,y,z = np.unravel_index(bin_target_idx_sorted[j], bin_target.shape)
+            v = bin_target_flat[bin_target_idx_sorted[j]]
+            XX = edges[0][x:x + 2]
+            YY = edges[1][y:y + 2]
+            ZZ = edges[2][z:z + 2]
+            # edge cases needed b/c histogramdd includes righest-most edge in bin
+            #if (x < (nx - 1)) & (y < (ny - 1)) & (z < (nz - 1)):
+            #    sublidar = lidar[(lidar[:, 0] >= XX[0]) & (lidar[:, 0] < XX[1]) & (lidar[:, 1] >= YY[0]) & (lidar[:, 1] < YY[1]) & (lidar[:, 2] >= ZZ[0]) & (lidar[:, 2] < ZZ[1])]
+            if x < (nx - 1):
+                sublidar = lidar[(lidar[:, 0] >= XX[0]) & (lidar[:, 0] < XX[1])]
+            else:
+                sublidar = lidar[(lidar[:, 0] >= XX[0]) & (lidar[:, 0] <= XX[1])]
+            if y < (ny - 1):
+                sublidar = sublidar[(sublidar[:, 1] >= YY[0]) & (sublidar[:, 1] < YY[1])]
+            else:
+                sublidar = sublidar[(sublidar[:, 1] >= YY[0]) & (sublidar[:, 1] <= YY[1])]
+            if z < (nz - 1):
+                sublidar = sublidar[(sublidar[:, 2] >= ZZ[0]) & (sublidar[:, 2] < ZZ[1])]
+            else:
+                sublidar = sublidar[(sublidar[:, 2] >= ZZ[0]) & (sublidar[:, 2] <= ZZ[1])]
+            assert sublidar.shape[0] == bins[x, y, z]
+            assert sublidar.shape[0] >= v
+            subsampled[i:(i + v)] = sublidar[np.random.choice(range(sublidar.shape[0]), v, replace=False)]
+            #subsampled[i:(i + v)] = sublidar[:v]
+
+            i += v
+            j -= 1
         return subsampled
 
     @staticmethod
@@ -377,7 +386,7 @@ class DidiTracklet(object):
             subsample_time_start = time.time()
             lidar = DidiTracklet._lidar_subsample(lidar, num_points)
             subsample_time_end = time.time()
-            print 'Total subsample time: %0.3f ms' % ((subsample_time_end - subsample_time_start) * 1000.0)
+            #print 'Total subsample time: %0.3f ms' % ((subsample_time_end - subsample_time_start) * 1000.0)
 
         return lidar
 
