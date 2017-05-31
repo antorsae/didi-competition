@@ -487,6 +487,12 @@ class DidiTracklet(object):
         lidar = self.lidars[frame]
         return self.filter_lidar(lidar, num_points = num_points, remove_capture_vehicle=remove_capture_vehicle, max_distance = max_distance)
 
+    def get_box(self, frame):
+        assert self._boxes is not None
+        assert len(self._boxes[frame]) == 1
+        box = self._boxes[frame][0] # first box for now
+        return box
+
     def get_box_centroid(self, frame):
         assert self._boxes is not None
         assert len(self._boxes[frame]) == 1
