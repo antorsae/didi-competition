@@ -403,7 +403,9 @@ class DidiTracklet(object):
 
         return lidar
 
-    def get_lidar_rings(self, frame, rings, points_per_ring, pad, rotate=0., clip=None):
+    ''' Returns array len(rings), points_per_ring, 2 
+    '''
+    def get_lidar_rings(self, frame, rings, points_per_ring, rotate=0., clip=None, flipX = False, flipY=False, jitter=False):
         if frame not in self.lidars:
             self._read_lidar(frame)
             assert frame in self.lidars
@@ -412,8 +414,12 @@ class DidiTracklet(object):
         if rotate != 0.:
             lidar = point_utils.rotZ(lidar, rotate)
 
+        if flipX:
+            lidar[:,0] = -lidar[:,0]
+        if flipY:
+            lidar[:,1] = -lidar[:,1]
+
         lidar_d_i = np.empty((len(rings), points_per_ring, 2), dtype=np.float32)
-        PAD = pad # half of receptive field
         for i in rings:
             l  = lidar[lidar[:,4] == i]
             lp = l.shape[0]
