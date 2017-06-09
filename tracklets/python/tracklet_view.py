@@ -53,6 +53,8 @@ if __name__ == '__main__':
                                 help='random perturbation (augmentation)')
             parser.add_argument('-1', '--first', type=int, action='store',
                                 help='View one frame only, e.g. -1 87 (views frame 87)')
+            parser.add_argument('-m', '--many', type=int, action='store',
+                                help='How many frames to view, e.g. -m 100 (views up to 100 frames)')
             parser.add_argument('-n', '--num-points', type=int, action='store',
                                 help='Resample to number of points, e.g. -n 27000')
             parser.add_argument('-d', '--distance', default=50., type=float, action='store',
@@ -66,10 +68,21 @@ if __name__ == '__main__':
             for tracklet in diditracklets:
                 tvv = None
 
-                frames = tracklet.frames() if args.first is None else [args.first]
+                _frames = tracklet.frames()
+                _first  = _frames[0] if args.first is None else args.first
+                _many = None
+                if args.first and (args.many is None):
+                    _many = 1
+                elif args.many is not None:
+                    _many = args.many
+                if _many is not None:
+                    frames = [f for f in _frames if f in range(_first, _first+_many)]
+                else:
+                    frames = _frames
+
+                print("Loading: " + str(len(frames)) + " / " + str(len(_frames)) + " frames")
 
                 for frame in frames:
-
                     tv = tracklet.top_view(frame,
                                            with_boxes=True,
                                            zoom_to_box=args.zoom_to_box,

@@ -12,3 +12,4 @@ CAP_FRONT_RTK_TOPICS = ["/capture_vehicle/front/gps/rtkfix", "/objects/capture_v
 OBJECTS_TOPIC_ROOT = "/objects"
 
 LIDAR_TOPICS = ["/velodyne_points"]
+TF_TOPIC = "/tf"

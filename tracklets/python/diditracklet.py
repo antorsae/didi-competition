@@ -209,11 +209,13 @@ class DidiTracklet(object):
 
     def _read_lidar(self, frame):
         if frame not in self.kitti_data.frame_range:
-            self.kitti_data = pykitti.raw(self.basedir, self.date, self.drive,
-                                          range(frame, frame + 1))  # , range(start_frame, start_frame + total_frames))
+            self.kitti_data = pykitti.raw(self.basedir, self.date, self.drive, [frame])  # , range(start_frame, start_frame + total_frames))
             self.kitti_data.load_calib()
         assert frame in self.kitti_data.frame_range
-        self.kitti_data.load_velo()  # Each scan is a Nx4 array of [x,y,z,reflectance]
+        self.kitti_data.load_velo()
+        if len(self.kitti_data.velo) != 1:
+            print(frame, self, self.xml_path, self.kitti_data.velo)
+            print(len(self.lidars))
         assert len(self.kitti_data.velo) == 1
         lidar = self.kitti_data.velo[0]
         self.lidars[frame] = lidar
@@ -405,12 +407,11 @@ class DidiTracklet(object):
 
     ''' Returns array len(rings), points_per_ring, 2 
     '''
-    def get_lidar_rings(self, frame, rings, points_per_ring, rotate=0., clip=None, flipX = False, flipY=False, jitter=False):
+    def get_lidar_rings(self, frame, rings, points_per_ring, clip=None, rotate=0., flipX = False, flipY=False, jitter=False):
         if frame not in self.lidars:
             self._read_lidar(frame)
             assert frame in self.lidars
         lidar  = self.lidars[frame]
-
         if rotate != 0.:
             lidar = point_utils.rotZ(lidar, rotate)
 
@@ -423,19 +424,20 @@ class DidiTracklet(object):
         for i in rings:
             l  = lidar[lidar[:,4] == i]
             lp = l.shape[0]
-            #assert  lp<= (points_per_ring + PAD *2)
+            if lp < 2:
+                _int_d = _int_i = np.zeros((points_per_ring), dtype=np.float32)
+            else:
+                _r  = np.arctan2(l[:, 1], l[:, 0])  # y/x
+                _d  = np.linalg.norm(l[:, :3], axis=1)  # total distance
+                _i  = l[:,3]
 
-            _r  = np.arctan2(l[:, 1], l[:, 0])  # y/x
-            _d  = np.linalg.norm(l[:, :3], axis=1)  # total distance
-            _i  = l[:,3]
-            __d = scipy.interpolate.interp1d(_r, _d, fill_value='extrapolate', kind='nearest')
-            __i = scipy.interpolate.interp1d(_r, _i, fill_value='extrapolate', kind='nearest')
+                __d = scipy.interpolate.interp1d(_r, _d, fill_value='extrapolate', kind='nearest')
+                __i = scipy.interpolate.interp1d(_r, _i, fill_value='extrapolate', kind='nearest')
 
-            _int_d = __d(np.linspace(-np.pi, (points_per_ring - 1) * np.pi / points_per_ring, num=points_per_ring))
-            if clip is not None:
-                np.clip(_int_d, clip[0], clip[1], out=_int_d)
-                #print(np.amax(_int_d))
-            _int_i = __i(np.linspace(-np.pi, (points_per_ring - 1) * np.pi / points_per_ring, num=points_per_ring))
+                _int_d = __d(np.linspace(-np.pi, (points_per_ring - 1) * np.pi / points_per_ring, num=points_per_ring))
+                if clip is not None:
+                    np.clip(_int_d, clip[0], clip[1], out=_int_d)
+                _int_i = __i(np.linspace(-np.pi, (points_per_ring - 1) * np.pi / points_per_ring, num=points_per_ring))
 
             lidar_d_i[i-rings[0]] = np.vstack((_int_d, _int_i)).T
 
