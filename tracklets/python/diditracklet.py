@@ -370,7 +370,7 @@ class DidiTracklet(object):
     @staticmethod
     def resample_lidar(lidar, num_points):
         lidar_size = lidar.shape[0]
-        if num_points > lidar_size:
+        if (num_points > lidar_size) and (lidar_size > 0):
             upsample_time_start = time.time()
 
             #lidar = np.concatenate((lidar, lidar[np.random.choice(lidar.shape[0], size=num_points - lidar_size, replace=True)]), axis = 0)
@@ -393,12 +393,25 @@ class DidiTracklet(object):
         return lidar
 
     @staticmethod
-    def filter_lidar(lidar, num_points = None, remove_capture_vehicle=True, max_distance = None):
+    def filter_lidar(lidar, num_points = None, remove_capture_vehicle=True, max_distance = None, angle_cone = None, rings = None):
+
+        if rings is not None:
+            rlidar = np.empty((0, 4), dtype=np.float32)
+            for ring in rings:
+                l = lidar[lidar[:,4] == ring]
+                rlidar = np.concatenate((rlidar, l[:,:4]), axis=0)
+
         if remove_capture_vehicle:
             lidar = DidiTracklet._remove_capture_vehicle(lidar)
 
         if max_distance is not None:
             lidar = lidar[(lidar[:,0] ** 2 + lidar[:,1] ** 2) <= (max_distance **2)]
+
+        if angle_cone is not None:
+            min_angle = angle_cone[0]
+            max_angle = angle_cone[1]
+            angles = np.arctan2(lidar[:,1], lidar[:,0])
+            lidar = lidar[(min_angle >= angles) & (angles <= max_angle)]
 
         if num_points is not None:
             lidar = DidiTracklet.resample_lidar(lidar, num_points)
@@ -420,26 +433,29 @@ class DidiTracklet(object):
         if flipY:
             lidar[:,1] = -lidar[:,1]
 
-        lidar_d_i = np.empty((len(rings), points_per_ring, 2), dtype=np.float32)
+        lidar_d_i = np.empty((len(rings), points_per_ring, 3), dtype=np.float32)
         for i in rings:
             l  = lidar[lidar[:,4] == i]
             lp = l.shape[0]
             if lp < 2:
-                _int_d = _int_i = np.zeros((points_per_ring), dtype=np.float32)
+                _int_dr = _int_dh = _int_i = np.zeros((points_per_ring), dtype=np.float32)
             else:
-                _r  = np.arctan2(l[:, 1], l[:, 0])  # y/x
-                _d  = np.linalg.norm(l[:, :3], axis=1)  # total distance
-                _i  = l[:,3]
+                _r   = np.arctan2(l[:, 1], l[:, 0])  # y/x
+                _dr  = np.linalg.norm(l[:, :2], axis=1)  # x,y radius
+                _dh  = l[:,2]
+                _i   = l[:,3]
 
-                __d = scipy.interpolate.interp1d(_r, _d, fill_value='extrapolate', kind='nearest')
-                __i = scipy.interpolate.interp1d(_r, _i, fill_value='extrapolate', kind='nearest')
+                __dr = scipy.interpolate.interp1d(_r, _dr, fill_value='extrapolate', kind='nearest')
+                __dh = scipy.interpolate.interp1d(_r, _dh, fill_value='extrapolate', kind='nearest')
+                __i  = scipy.interpolate.interp1d(_r, _i, fill_value='extrapolate', kind='nearest')
 
-                _int_d = __d(np.linspace(-np.pi, (points_per_ring - 1) * np.pi / points_per_ring, num=points_per_ring))
+                _int_dr = __dr(np.linspace(-np.pi, (points_per_ring - 1) * np.pi / points_per_ring, num=points_per_ring))
+                _int_dh = __dh(np.linspace(-np.pi, (points_per_ring - 1) * np.pi / points_per_ring, num=points_per_ring))
                 if clip is not None:
-                    np.clip(_int_d, clip[0], clip[1], out=_int_d)
+                    np.clip(_int_dr, clip[0], clip[1], out=_int_dr)
                 _int_i = __i(np.linspace(-np.pi, (points_per_ring - 1) * np.pi / points_per_ring, num=points_per_ring))
 
-            lidar_d_i[i-rings[0]] = np.vstack((_int_d, _int_i)).T
+            lidar_d_i[i-rings[0]] = np.vstack((_int_dr, _int_dh, _int_i)).T
 
         return lidar_d_i
 
@@ -488,12 +504,13 @@ class DidiTracklet(object):
         return aliased_lidar
 
 
-    def get_lidar(self, frame, num_points = None, remove_capture_vehicle=True, max_distance = None):
+    def get_lidar(self, frame, num_points = None, remove_capture_vehicle=True, max_distance = None, angle_cone=None, rings=None):
         if frame not in self.lidars:
             self._read_lidar(frame)
             assert frame in self.lidars
         lidar = self.lidars[frame]
-        return self.filter_lidar(lidar, num_points = num_points, remove_capture_vehicle=remove_capture_vehicle, max_distance = max_distance)
+        return self.filter_lidar(lidar, num_points = num_points, remove_capture_vehicle=remove_capture_vehicle,
+                                 max_distance = max_distance, angle_cone=angle_cone, rings=rings)
 
     def get_box(self, frame):
         assert self._boxes is not None
