@@ -418,13 +418,17 @@ class DidiTracklet(object):
 
         return lidar
 
-    ''' Returns array len(rings), points_per_ring, 2 
-    '''
     def get_lidar_rings(self, frame, rings, points_per_ring, clip=None, rotate=0., flipX = False, flipY=False, jitter=False):
         if frame not in self.lidars:
             self._read_lidar(frame)
             assert frame in self.lidars
         lidar  = self.lidars[frame]
+        return DidiTracklet.filter_lidar_rings(lidar, rings, points_per_ring, clip=clip, rotate=rotate, flipX = flipX, flipY=flipY, jitter=jitter)
+
+    ''' Returns array len(rings), points_per_ring, 3 => (distance XY, distance Z, intensity)
+    '''
+    @staticmethod
+    def filter_lidar_rings(lidar, rings, points_per_ring, clip=None, rotate=0., flipX = False, flipY=False, jitter=False):
         if rotate != 0.:
             lidar = point_utils.rotZ(lidar, rotate)
 
@@ -458,51 +462,6 @@ class DidiTracklet(object):
             lidar_d_i[i-rings[0]] = np.vstack((_int_dr, _int_dh, _int_i)).T
 
         return lidar_d_i
-
-    def _alias_lidar_rings(self, frame, rings, points_per_ring):
-        if frame not in self.lidars:
-            self._read_lidar(frame)
-            assert frame in self.lidars
-        lidar = self.lidars[frame]
-        lidar_d_i    = np.empty((rings, points_per_ring, 2))
-        lidar_r_p    = np.empty((rings, points_per_ring, 2))
-
-        lidar_points = np.empty((rings, points_per_ring, 3))
-        for i in range(rings):
-            l  = lidar[lidar[:,4] == i]
-            lp = l.shape[0]
-            #assert  lp<= (points_per_ring + PAD *2)
-            _d = np.linalg.norm(l[:,:3], axis=1) # total distance
-            _r = np.arctan2(l[:,1], l[:,0]) # y/x
-            _p = np.arctan2(l[:,2], np.linalg.norm(l[:,:2], axis=1))     # z/sqrt(x**2+y**2)
-            _i = l[:,3]
-            _int_d = np.interp(np.linspace(0,1.,num=points_per_ring), xp = np.linspace(0,1.,num=lp), fp = _d)
-            _int_i = np.interp(np.linspace(0,1.,num=points_per_ring), xp = np.linspace(0,1.,num=lp), fp = _i)
-            _int_r = np.interp(np.linspace(0,1.,num=points_per_ring), xp = np.linspace(0,1.,num=lp), fp = _r)
-            _int_p = np.interp(np.linspace(0,1.,num=points_per_ring), xp = np.linspace(0,1.,num=lp), fp = _p)
-
-            lidar_d_i[i]    = np.vstack((_int_d, _int_i)).T
-            lidar_r_p[i]    = np.vstack((_int_r, _int_p)).T
-
-            _int_x = np.interp(np.linspace(0,1.,num=points_per_ring), xp = np.linspace(0,1.,num=lp), fp = l[:,0])
-            _int_y = np.interp(np.linspace(0,1.,num=points_per_ring), xp = np.linspace(0,1.,num=lp), fp = l[:,1])
-            _int_z = np.interp(np.linspace(0,1.,num=points_per_ring), xp = np.linspace(0,1.,num=lp), fp = l[:,2])
-
-            lidar_points[i]  = np.vstack((_int_x, _int_y, _int_z)).T
-
-        aliased_lidar = np.empty((rings * points_per_ring, 4))
-
-        for i in range(rings):
-            print( np.sin(lidar_r_p[i,:,1]).shape)
-            z = np.expand_dims(lidar_d_i[i,:,0]  * np.sin(lidar_r_p[i,:,1]), axis=-1)
-            print(z.shape)
-            x = np.expand_dims(lidar_d_i[i,:,0] * np.cos(lidar_r_p[i,:,1])  * np.cos(lidar_r_p[i,:,0]), axis=-1)
-            y = np.expand_dims(lidar_d_i[i,:,0] * np.cos(lidar_r_p[i,:,1])  * np.sin(lidar_r_p[i,:,0]), axis=-1)
-
-            aliased_lidar[i*points_per_ring:(i+1) * points_per_ring] = np.concatenate((x,y,z, lidar_d_i[i,:,1:2]), axis=1)
-
-        return aliased_lidar
-
 
     def get_lidar(self, frame, num_points = None, remove_capture_vehicle=True, max_distance = None, angle_cone=None, rings=None):
         if frame not in self.lidars:
