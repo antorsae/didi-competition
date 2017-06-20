@@ -39,14 +39,14 @@ if __name__ == '__main__':
 
         def run(self):
             parser = argparse.ArgumentParser(description='View tracklets.')
-            parser.add_argument('-i', '--indir', type=str, default='../../../../release2/Data-points-processed',
+            parser.add_argument('-i', '--indir', type=str, default='../../../../didi-data/release2/Data-points-processed',
                                 help='Input folder where processed tracklet subdirectories are located')
             parser.add_argument('-f', '--filter', type=str, nargs='+', default=None,
                                 help='Only include date/drive tracklet subdirectories, e.g. -f 1/21_f 2/24')
             parser.add_argument('-y', '--yaw', type=float, default=0.,
                                 help='Force initial yaw correction (e.g. -y 0.88)')
             parser.add_argument('-xi', '--xml-filename', type=str, default='tracklet_labels.xml',
-                                help='tracklet xml filename (defaults to tracklet_labels.xml)')
+                                help='tracklet xml filename (defaults to tracklet_labels.xml, TIP: use tracklet_labels_trainable.xml if available)')
             parser.add_argument('-z', '--zoom-to-box', action='store_true',
                                 help='zoom view to bounding box')
             parser.add_argument('-r', '--randomize', action='store_true',
@@ -60,10 +60,13 @@ if __name__ == '__main__':
             parser.add_argument('-d', '--distance', default=50., type=float, action='store',
                                 help='Distance ')
             parser.add_argument('-or', '--only-rings', nargs='+', action='store', help='Only include rings, e.g. -or 10 11 12 13')
+            parser.add_argument('-sw', '--scale-w', default=1., type=float, action='store', help='Scale bounding box width ')
+            parser.add_argument('-sl', '--scale-l', default=1., type=float, action='store', help='Scale bounding box width ')
+            parser.add_argument('-sh', '--scale-h', default=1., type=float, action='store', help='Scale bounding box width ')
 
             args = parser.parse_args()
 
-            diditracklets = find_tracklets(args.indir, args.filter, args.yaw, args.xml_filename)
+            diditracklets = find_tracklets(args.indir, args.filter, args.yaw, args.xml_filename, False, (args.scale_h, args.scale_w, args.scale_l))
 
             for tracklet in diditracklets:
                 tvv = None
@@ -91,6 +94,10 @@ if __name__ == '__main__':
                                            distance = args.distance,
                                            rings = args.only_rings,
                                            num_points = args.num_points)
+
+                    obs_points = tracklet.get_points_in_box(frame, ignore_z=False)
+                    print('frame ' + str(frame), obs_points)
+
                     if tvv is None:
                         tvv = np.expand_dims(tv, axis=0)
                     else:

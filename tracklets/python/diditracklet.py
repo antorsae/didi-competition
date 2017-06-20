@@ -38,7 +38,8 @@ def find_tracklets(
         filter=None,
         yaw_correction=0.,
         xml_filename="tracklet_labels_refined.xml",
-        flip=False):
+        flip=False,
+        box_scaling=(1.,1.,1.)):
     diditracklets = []
     combined_filter = "(" + ")|(".join(filter) + "$)" if filter is not None else None
     if combined_filter is not None:
@@ -53,7 +54,8 @@ def find_tracklets(
                             diditracklet = DidiTracklet(root, date, drive,
                                                         yaw_correction=yaw_correction,
                                                         xml_filename=xml_filename,
-                                                        flip=flip)
+                                                        flip=flip,
+                                                        box_scaling=box_scaling)
                             diditracklets.append(diditracklet)
 
     return diditracklets
@@ -65,7 +67,7 @@ class DidiTracklet(object):
 
     LIDAR_ANGLE = np.pi / 6.
 
-    def __init__(self, basedir, date, drive, yaw_correction=0., xml_filename="tracklet_labels_refined.xml", flip=False):
+    def __init__(self, basedir, date, drive, yaw_correction=0., xml_filename="tracklet_labels_refined.xml", flip=False, box_scaling=(1.,1.,1.)):
         self.basedir = basedir
         self.date    = date
         self.drive   = drive
@@ -95,6 +97,7 @@ class DidiTracklet(object):
         # boxes is a dict indexed by frame:  e.g. boxes[10] = [box, box, ...]
         self._boxes = None  # defaultdict(list)
         self._last_refined_box = None
+        self._box_scaling = box_scaling
 
         reference_file = os.path.join(basedir, date, 'obs.txt')
 
@@ -247,7 +250,8 @@ class DidiTracklet(object):
                 for frame_offset in range(t.first_frame, t.first_frame + t.num_frames):
                     idx = frame_offset - t.first_frame
                     if self.__include_tracklet(t, idx):
-                        h, w, l = t.size
+                        h, w, l = np.multiply(t.size, self._box_scaling)
+
                         assert (h > 0.) and (w > 0.) and (l > 0.)
                         # in velo:
                         # A       D
@@ -482,6 +486,16 @@ class DidiTracklet(object):
         assert len(self._boxes[frame]) == 1
         box = self._boxes[frame][0] # first box for now
         return np.average(box, axis=1)
+
+    def get_points_in_box(self, frame, ignore_z=True):
+        if frame not in self.lidars:
+            self._read_lidar(frame)
+            assert frame in self.lidars
+        assert self._boxes is not None
+        assert len(self._boxes[frame]) == 1
+        box = self._boxes[frame][0] # first box for now
+        lidar = self.lidars[frame]
+        return self.__lidar_in_box(lidar, box, ignore_z=ignore_z)
 
     def get_number_of_points_in_box(self, frame, ignore_z=True):
         if frame not in self.lidars:
