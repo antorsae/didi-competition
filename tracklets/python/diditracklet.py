@@ -9,7 +9,6 @@ from collections import defaultdict
 import cv2
 import point_utils
 from scipy.linalg import expm3, norm
-import pcl
 import os
 import sys
 import re
@@ -525,6 +524,9 @@ class DidiTracklet(object):
                    min_percent_first = 0.6,
                    threshold_distance = 0.3,
                    search_yaw=False):
+        # this is imported here so everything else works even if not installed
+        # install from https://github.com/strawlab/python-pcl
+        import pcl
 
         if look_back_last_refined_centroid is None:
             assert self._boxes is not None
