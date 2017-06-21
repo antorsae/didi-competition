@@ -431,7 +431,7 @@ class DidiTracklet(object):
     ''' Returns array len(rings), points_per_ring, 3 => (distance XY, distance Z, intensity)
     '''
     @staticmethod
-    def filter_lidar_rings(lidar, rings, points_per_ring, clip=None, rotate=0., flipX = False, flipY=False, jitter=False):
+    def filter_lidar_rings(lidar, rings, points_per_ring, clip=None, rotate=0., flipX = False, flipY=False, jitter=False, return_lidar_interpolated=False):
         if rotate != 0.:
             lidar = point_utils.rotZ(lidar, rotate)
 
@@ -440,7 +440,9 @@ class DidiTracklet(object):
         if flipY:
             lidar[:,1] = -lidar[:,1]
 
-        lidar_d_i = np.empty((len(rings), points_per_ring, 3), dtype=np.float32)
+        lidar_d_i = np.empty((len(rings), points_per_ring,  3), dtype=np.float32)
+        if return_lidar_interpolated:
+            lidar_int = np.empty((len(rings) * points_per_ring, 5), dtype=np.float32)
         for i in rings:
             l  = lidar[lidar[:,4] == i]
             lp = l.shape[0]
@@ -454,17 +456,27 @@ class DidiTracklet(object):
 
                 __dr = scipy.interpolate.interp1d(_r, _dr, fill_value='extrapolate', kind='nearest')
                 __dh = scipy.interpolate.interp1d(_r, _dh, fill_value='extrapolate', kind='nearest')
-                __i  = scipy.interpolate.interp1d(_r, _i, fill_value='extrapolate', kind='nearest')
+                __i  = scipy.interpolate.interp1d(_r, _i,  fill_value='extrapolate', kind='nearest')
 
-                _int_dr = __dr(np.linspace(-np.pi, (points_per_ring - 1) * np.pi / points_per_ring, num=points_per_ring))
-                _int_dh = __dh(np.linspace(-np.pi, (points_per_ring - 1) * np.pi / points_per_ring, num=points_per_ring))
+                _int_r  = np.linspace(-np.pi, (points_per_ring - 1) * np.pi / points_per_ring, num=points_per_ring)
+                _int_dr = __dr(_int_r)
+                _int_dh = __dh(_int_r)
                 if clip is not None:
                     np.clip(_int_dr, clip[0], clip[1], out=_int_dr)
-                _int_i = __i(np.linspace(-np.pi, (points_per_ring - 1) * np.pi / points_per_ring, num=points_per_ring))
+                _int_i = __i(_int_r)
+
+            if return_lidar_interpolated:
+                _int_x = np.multiply(_int_dr, np.cos(_int_r))
+                _int_y = np.multiply(_int_dr, np.sin(_int_r))
+                _int_z = _int_dh
+                lidar_int[points_per_ring * i:points_per_ring * (i+1)] = np.vstack((_int_x, _int_y, _int_z, _int_i, i * np.ones(points_per_ring))).T
 
             lidar_d_i[i-rings[0]] = np.vstack((_int_dr, _int_dh, _int_i)).T
 
-        return lidar_d_i
+        if return_lidar_interpolated:
+            return lidar_d_i, lidar_int
+        else:
+            return lidar_d_i
 
     def get_lidar(self, frame, num_points = None, remove_capture_vehicle=True, max_distance = None, angle_cone=None, rings=None):
         if frame not in self.lidars:
@@ -494,7 +506,7 @@ class DidiTracklet(object):
         assert len(self._boxes[frame]) == 1
         box = self._boxes[frame][0] # first box for now
         lidar = self.lidars[frame]
-        return self.__lidar_in_box(lidar, box, ignore_z=ignore_z)
+        return DidiTracklet.get_lidar_in_box(lidar, box, ignore_z=ignore_z)
 
     def get_number_of_points_in_box(self, frame, ignore_z=True):
         if frame not in self.lidars:
@@ -504,7 +516,7 @@ class DidiTracklet(object):
         assert len(self._boxes[frame]) == 1
         box = self._boxes[frame][0] # first box for now
         lidar = self.lidars[frame]
-        return len(self.__lidar_in_box(lidar, box, ignore_z=ignore_z))
+        return len(DidiTracklet.get_lidar_in_box(lidar, box, ignore_z=ignore_z))
 
     def top_and_side_view(self, frame, with_boxes=True, lidar_override=None, SX=None, abl_overrides=None, zoom_to_box=False, distance=50.):
         tv = self.top_view(frame, with_boxes=with_boxes, lidar_override=lidar_override,
@@ -658,7 +670,7 @@ class DidiTracklet(object):
     # useful if you want to stack lidar below or above camera image
     #
     def top_view(self, frame, with_boxes=True, lidar_override=None, SX=None,
-                 zoom_to_box=False, side_view=False, randomize=False, distance=50., rings=None, num_points=None):
+                 zoom_to_box=False, side_view=False, randomize=False, distance=50., rings=None, num_points=None, points_per_ring=None):
 
         if with_boxes and zoom_to_box:
             assert self._boxes is not None
@@ -710,6 +722,13 @@ class DidiTracklet(object):
                 lidar = lidar[np.in1d(lidar[:,4],np.array(rings, dtype=np.float32))]
             if num_points is not None:
                 lidar = DidiTracklet.resample_lidar(lidar, num_points)
+            if points_per_ring is not None:
+                _, lidar = DidiTracklet.filter_lidar_rings(
+                    lidar,
+                    rings = range(32) if rings is None else rings,
+                    points_per_ring = points_per_ring,
+                    clip = (0., distance),
+                    return_lidar_interpolated = True)
 
         if randomize:
             centroid = self.get_box_centroid(frame)
@@ -820,12 +839,13 @@ class DidiTracklet(object):
             assert frame in self.lidars
 
         lidar = self.lidars[frame]
-        return self.__lidar_in_box(lidar, box, ignore_z=ignore_z)
+        return DidiTracklet.get_lidar_in_box(lidar, box, ignore_z=ignore_z)
 
     # returns lidar points that are inside a given box, or just the indexes
-    def __lidar_in_box(self, lidar, box, return_idx_only=False, ignore_z=False):
+    @staticmethod
+    def get_lidar_in_box(lidar, box, return_idx_only=False, ignore_z=False):
 
-        p = lidar[:, 0:3]
+        p = lidar[:, :3]
 
         # determine if points in M are inside a rectangle defined by AB AD (AB and AD are orthogonal)
         # tdlr: they are iff (0<AM⋅AB<AB⋅AB)∧(0<AM⋅AD<AD⋅AD)

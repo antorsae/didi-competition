@@ -59,6 +59,8 @@ if __name__ == '__main__':
                                 help='Resample to number of points, e.g. -n 27000')
             parser.add_argument('-d', '--distance', default=50., type=float, action='store',
                                 help='Distance ')
+            parser.add_argument('-p', '--points-per-ring', default=None, type=int, action='store',
+                                help='If specified, points per ring for linear interpolation')
             parser.add_argument('-or', '--only-rings', nargs='+', action='store', help='Only include rings, e.g. -or 10 11 12 13')
             parser.add_argument('-sw', '--scale-w', default=1., type=float, action='store', help='Scale bounding box width ')
             parser.add_argument('-sl', '--scale-l', default=1., type=float, action='store', help='Scale bounding box width ')
@@ -93,7 +95,8 @@ if __name__ == '__main__':
                                            randomize=args.randomize,
                                            distance = args.distance,
                                            rings = args.only_rings,
-                                           num_points = args.num_points)
+                                           num_points = args.num_points,
+                                           points_per_ring = args.points_per_ring)
 
                     obs_points = tracklet.get_points_in_box(frame, ignore_z=False)
                     print('frame ' + str(frame), obs_points)
