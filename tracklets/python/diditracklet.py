@@ -421,12 +421,13 @@ class DidiTracklet(object):
 
         return lidar
 
-    def get_lidar_rings(self, frame, rings, points_per_ring, clip=None, rotate=0., flipX = False, flipY=False, jitter=False):
+    def get_lidar_rings(self, frame, rings, points_per_ring, clip=None, rotate=0., flipX = False, flipY=False, jitter=False, return_lidar_interpolated=False):
         if frame not in self.lidars:
             self._read_lidar(frame)
             assert frame in self.lidars
         lidar  = self.lidars[frame]
-        return DidiTracklet.filter_lidar_rings(lidar, rings, points_per_ring, clip=clip, rotate=rotate, flipX = flipX, flipY=flipY, jitter=jitter)
+        return DidiTracklet.filter_lidar_rings(lidar, rings, points_per_ring, clip=clip, rotate=rotate,
+                                               flipX = flipX, flipY=flipY, jitter=jitter, return_lidar_interpolated = return_lidar_interpolated)
 
     ''' Returns array len(rings), points_per_ring, 3 => (distance XY, distance Z, intensity)
     '''
@@ -469,7 +470,7 @@ class DidiTracklet(object):
                 _int_x = np.multiply(_int_dr, np.cos(_int_r))
                 _int_y = np.multiply(_int_dr, np.sin(_int_r))
                 _int_z = _int_dh
-                lidar_int[points_per_ring * i:points_per_ring * (i+1)] = np.vstack((_int_x, _int_y, _int_z, _int_i, i * np.ones(points_per_ring))).T
+                lidar_int[points_per_ring * (i-rings[0]):points_per_ring * (i+1-rings[0])] = np.vstack((_int_x, _int_y, _int_z, _int_i, i * np.ones(points_per_ring))).T
 
             lidar_d_i[i-rings[0]] = np.vstack((_int_dr, _int_dh, _int_i)).T
 
