@@ -98,8 +98,8 @@ if __name__ == '__main__':
                                            num_points = args.num_points,
                                            points_per_ring = args.points_per_ring)
 
-                    obs_points = tracklet.get_points_in_box(frame, ignore_z=False)
-                    print('frame ' + str(frame), obs_points)
+                    #obs_points = tracklet.get_points_in_box(frame, ignore_z=False)
+                    #print('frame ' + str(frame), obs_points)
 
                     if tvv is None:
                         tvv = np.expand_dims(tv, axis=0)
