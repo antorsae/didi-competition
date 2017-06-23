@@ -793,11 +793,15 @@ class DidiTracklet(object):
                 assert len(self.tracklet_data) == 1  # only one tracklet supported for now!
                 t = self.tracklet_data[0]
                 if t.states[frame - t.first_frame] == tracklets.STATE_UNSET:
-                    box_color = (0., 0., 1.)
+                    box_color = np.float32([0., 0., 1.])
                 else:
-                    box_color = (1., 0., 0.)
+                    box_color = np.float32([1., 0., 0.])
 
-                cv2.polylines(top_view, [np.int32((a, b, c, d)).reshape((-1, 1, 2))], True, box_color, thickness=1)
+                cv2.polylines(top_view, [np.int32((a, b, c, d)).reshape((-1, 1, 2))], True, box_color.tolist(), thickness=1)
+
+                box_color *= 0.5
+
+                cv2.polylines(top_view, [np.int32((a,b,(d+b)/2.)).reshape((-1, 1, 2))], True, box_color.tolist(), thickness=1)
 
                 lidar_in_box  = self._lidar_in_box(frame, box)
                 for point in lidar_in_box:
