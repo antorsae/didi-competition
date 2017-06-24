@@ -5,9 +5,17 @@ from scipy.spatial.distance import cdist
 
 Z_SEARCH_SLICE = 0.02
 
+def remove_orientation(yaw):
+    yaw = np.fmod(yaw, np.pi)
+    if yaw >= np.pi / 2.:
+        yaw -= np.pi
+    elif yaw <= -np.pi / 2.:
+        yaw += np.pi
+    assert (yaw <= (np.pi / 2.)) and (yaw >= (-np.pi / 2.))
+    return yaw
+
 def M(axis, theta):
     return expm3(np.cross(np.eye(3), axis / norm(axis) * theta))
-
 
 def rotate(points, axis, theta):
     if points.ndim == 1:
