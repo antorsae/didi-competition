@@ -94,7 +94,7 @@ if __name__ == '__main__':
                                            SX=400,
                                            randomize=args.randomize,
                                            distance = args.distance,
-                                           rings = args.only_rings,
+                                           rings = map(int, args.only_rings),
                                            num_points = args.num_points,
                                            points_per_ring = args.points_per_ring)
 

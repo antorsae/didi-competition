@@ -421,18 +421,25 @@ class DidiTracklet(object):
 
         return lidar
 
-    def get_lidar_rings(self, frame, rings, points_per_ring, clip=None, rotate=0., flipX = False, flipY=False, jitter=False, return_lidar_interpolated=False):
+    def get_lidar_rings(self, frame, rings, points_per_ring, clip=None, clip_h=None,
+                        rotate=0., flipX = False, flipY=False, jitter=False,
+                        return_lidar_interpolated=False, return_angle_at_edges = False):
         if frame not in self.lidars:
             self._read_lidar(frame)
             assert frame in self.lidars
         lidar  = self.lidars[frame]
-        return DidiTracklet.filter_lidar_rings(lidar, rings, points_per_ring, clip=clip, rotate=rotate,
-                                               flipX = flipX, flipY=flipY, jitter=jitter, return_lidar_interpolated = return_lidar_interpolated)
+        return DidiTracklet.filter_lidar_rings(lidar, rings, points_per_ring, clip=clip, clip_h = clip_h,
+                                               rotate=rotate, flipX = flipX, flipY=flipY, jitter=jitter,
+                                               return_lidar_interpolated = return_lidar_interpolated,
+                                               return_angle_at_edges = return_angle_at_edges)
 
     ''' Returns array len(rings), points_per_ring, 3 => (distance XY, distance Z, intensity)
     '''
     @staticmethod
-    def filter_lidar_rings(lidar, rings, points_per_ring, clip=None, rotate=0., flipX = False, flipY=False, jitter=False, return_lidar_interpolated=False):
+    def filter_lidar_rings(lidar, rings, points_per_ring, clip=None, clip_h = None,
+                           rotate=0., flipX = False, flipY=False, jitter=False,
+                           return_lidar_interpolated=False,
+                           return_angle_at_edges=False):
         if rotate != 0.:
             lidar = point_utils.rotZ(lidar, rotate)
 
@@ -442,14 +449,22 @@ class DidiTracklet(object):
             lidar[:,1] = -lidar[:,1]
 
         lidar_d_i = np.empty((len(rings), points_per_ring,  3), dtype=np.float32)
+
+        if return_angle_at_edges:
+            angle_at_edges = np.zeros((len(rings), 2), dtype=np.float32)
+
         if return_lidar_interpolated:
             lidar_int = np.empty((len(rings) * points_per_ring, 5), dtype=np.float32)
+        _int_r  = np.linspace(-np.pi, (points_per_ring - 1) * np.pi / points_per_ring, num=points_per_ring)
         for i in rings:
             l  = lidar[lidar[:,4] == i]
             lp = l.shape[0]
             if lp < 2:
                 _int_dr = _int_dh = _int_i = np.zeros((points_per_ring), dtype=np.float32)
             else:
+                if return_angle_at_edges:
+                    angle_at_edges[i-rings[0]] = (np.arctan2(l[0, 1], l[0, 0]), np.arctan2(l[-1, 1], l[-1, 0]), l.shape[0])
+
                 _r   = np.arctan2(l[:, 1], l[:, 0])  # y/x
                 _dr  = np.linalg.norm(l[:, :2], axis=1)  # x,y radius
                 _dh  = l[:,2]
@@ -459,11 +474,12 @@ class DidiTracklet(object):
                 __dh = scipy.interpolate.interp1d(_r, _dh, fill_value='extrapolate', kind='nearest')
                 __i  = scipy.interpolate.interp1d(_r, _i,  fill_value='extrapolate', kind='nearest')
 
-                _int_r  = np.linspace(-np.pi, (points_per_ring - 1) * np.pi / points_per_ring, num=points_per_ring)
                 _int_dr = __dr(_int_r)
                 _int_dh = __dh(_int_r)
                 if clip is not None:
                     np.clip(_int_dr, clip[0], clip[1], out=_int_dr)
+                if clip_h is not None:
+                    np.clip(_int_dh, clip_h[0], clip_h[1], out=_int_dh)
                 _int_i = __i(_int_r)
 
             if return_lidar_interpolated:
@@ -474,10 +490,16 @@ class DidiTracklet(object):
 
             lidar_d_i[i-rings[0]] = np.vstack((_int_dr, _int_dh, _int_i)).T
 
+        ret = (lidar_d_i,)
         if return_lidar_interpolated:
-            return lidar_d_i, lidar_int
+            ret += (lidar_int,)
+        if return_angle_at_edges:
+            ret += (angle_at_edges,)
+
+        if len(ret) == 1:
+            return ret[0]
         else:
-            return lidar_d_i
+            return ret
 
     def get_lidar(self, frame, num_points = None, remove_capture_vehicle=True, max_distance = None, angle_cone=None, rings=None):
         if frame not in self.lidars:
@@ -671,7 +693,8 @@ class DidiTracklet(object):
     # useful if you want to stack lidar below or above camera image
     #
     def top_view(self, frame, with_boxes=True, lidar_override=None, SX=None,
-                 zoom_to_box=False, side_view=False, randomize=False, distance=50., rings=None, num_points=None, points_per_ring=None):
+                 zoom_to_box=False, side_view=False, randomize=False, distance=50.,
+                 rings=None, num_points=None, points_per_ring=None):
 
         if with_boxes and zoom_to_box:
             assert self._boxes is not None
