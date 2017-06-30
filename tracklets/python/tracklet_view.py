@@ -49,7 +49,7 @@ if __name__ == '__main__':
                                 help='tracklet xml filename (defaults to tracklet_labels.xml, TIP: use tracklet_labels_trainable.xml if available)')
             parser.add_argument('-z', '--zoom-to-box', action='store_true',
                                 help='zoom view to bounding box')
-            parser.add_argument('-r', '--randomize', action='store_true',
+            parser.add_argument('-ra', '--randomize', action='store_true',
                                 help='random perturbation (augmentation)')
             parser.add_argument('-1', '--first', type=int, action='store',
                                 help='View one frame only, e.g. -1 87 (views frame 87)')
@@ -61,7 +61,7 @@ if __name__ == '__main__':
                                 help='Distance ')
             parser.add_argument('-p', '--points-per-ring', default=None, type=int, action='store',
                                 help='If specified, points per ring for linear interpolation')
-            parser.add_argument('-or', '--only-rings', nargs='+', action='store', help='Only include rings, e.g. -or 10 11 12 13')
+            parser.add_argument('-r', '--rings', nargs='+', type=int, action='store', help='Only include rings, e.g. -or 10 11 12 13')
             parser.add_argument('-sw', '--scale-w', default=1., type=float, action='store', help='Scale bounding box width ')
             parser.add_argument('-sl', '--scale-l', default=1., type=float, action='store', help='Scale bounding box width ')
             parser.add_argument('-sh', '--scale-h', default=1., type=float, action='store', help='Scale bounding box width ')
@@ -94,7 +94,7 @@ if __name__ == '__main__':
                                            SX=400,
                                            randomize=args.randomize,
                                            distance = args.distance,
-                                           rings = map(int, args.only_rings),
+                                           rings = range(args.rings[0], args.rings[1]) if args.rings else None,
                                            num_points = args.num_points,
                                            points_per_ring = args.points_per_ring)
 

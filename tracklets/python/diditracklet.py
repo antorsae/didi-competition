@@ -455,6 +455,7 @@ class DidiTracklet(object):
 
         if return_lidar_interpolated:
             lidar_int = np.empty((len(rings) * points_per_ring, 5), dtype=np.float32)
+
         _int_r  = np.linspace(-np.pi, (points_per_ring - 1) * np.pi / points_per_ring, num=points_per_ring)
         for i in rings:
             l  = lidar[lidar[:,4] == i]
@@ -465,7 +466,7 @@ class DidiTracklet(object):
                 if return_angle_at_edges:
                     angle_at_edges[i-rings[0]] = (np.arctan2(l[0, 1], l[0, 0]), np.arctan2(l[-1, 1], l[-1, 0]), l.shape[0])
 
-                _r   = np.arctan2(l[:, 1], l[:, 0])  # y/x
+                _r   = np.arctan2(l[:, 1], l[:, 0])      # y/x
                 _dr  = np.linalg.norm(l[:, :2], axis=1)  # x,y radius
                 _dh  = l[:,2]
                 _i   = l[:,3]
@@ -486,7 +487,8 @@ class DidiTracklet(object):
                 _int_x = np.multiply(_int_dr, np.cos(_int_r))
                 _int_y = np.multiply(_int_dr, np.sin(_int_r))
                 _int_z = _int_dh
-                lidar_int[points_per_ring * (i-rings[0]):points_per_ring * (i+1-rings[0])] = np.vstack((_int_x, _int_y, _int_z, _int_i, i * np.ones(points_per_ring))).T
+                lidar_int[points_per_ring * (i-rings[0]):points_per_ring * (i+1-rings[0])] = \
+                    np.vstack((_int_x, _int_y, _int_z, _int_i, i * np.ones(points_per_ring))).T
 
             lidar_d_i[i-rings[0]] = np.vstack((_int_dr, _int_dh, _int_i)).T
 
@@ -826,7 +828,8 @@ class DidiTracklet(object):
 
                 cv2.polylines(top_view, [np.int32((a,b,(d+b)/2.)).reshape((-1, 1, 2))], True, box_color.tolist(), thickness=1)
 
-                lidar_in_box  = self._lidar_in_box(frame, box)
+                lidar_in_box = DidiTracklet.get_lidar_in_box(lidar, box)
+                # lidar_in_box  = self._lidar_in_box(frame, box)
                 for point in lidar_in_box:
                     x, y = point[0], point[1]
                     if inRange(x, y):
