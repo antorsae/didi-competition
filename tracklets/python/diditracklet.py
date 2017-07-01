@@ -423,7 +423,8 @@ class DidiTracklet(object):
 
     def get_lidar_rings(self, frame, rings, points_per_ring, clip=None, clip_h=None,
                         rotate=0., flipX = False, flipY=False, jitter=False,
-                        return_lidar_interpolated=False, return_angle_at_edges = False):
+                        return_lidar_interpolated=False, return_lidar_deinterpolated=False,
+                        return_angle_at_edges = False):
         if frame not in self.lidars:
             self._read_lidar(frame)
             assert frame in self.lidars
@@ -431,7 +432,9 @@ class DidiTracklet(object):
         return DidiTracklet.filter_lidar_rings(lidar, rings, points_per_ring, clip=clip, clip_h = clip_h,
                                                rotate=rotate, flipX = flipX, flipY=flipY, jitter=jitter,
                                                return_lidar_interpolated = return_lidar_interpolated,
-                                               return_angle_at_edges = return_angle_at_edges)
+                                               return_lidar_deinterpolated = return_lidar_deinterpolated,
+                                               return_angle_at_edges = return_angle_at_edges,
+                                               )
 
     ''' Returns array len(rings), points_per_ring, 3 => (distance XY, distance Z, intensity)
     '''
@@ -439,6 +442,7 @@ class DidiTracklet(object):
     def filter_lidar_rings(lidar, rings, points_per_ring, clip=None, clip_h = None,
                            rotate=0., flipX = False, flipY=False, jitter=False,
                            return_lidar_interpolated=False,
+                           return_lidar_deinterpolated=False,
                            return_angle_at_edges=False):
         if rotate != 0.:
             lidar = point_utils.rotZ(lidar, rotate)
@@ -454,7 +458,10 @@ class DidiTracklet(object):
             angle_at_edges = np.zeros((len(rings), 2), dtype=np.float32)
 
         if return_lidar_interpolated:
-            lidar_int = np.empty((len(rings) * points_per_ring, 5), dtype=np.float32)
+            lidar_int   = np.empty((len(rings) * points_per_ring, 5), dtype=np.float32)
+
+        if return_lidar_deinterpolated:
+            lidar_deint = np.empty((0, 5), dtype=np.float32)
 
         _int_r  = np.linspace(-np.pi, (points_per_ring - 1) * np.pi / points_per_ring, num=points_per_ring)
         for i in rings:
@@ -490,11 +497,26 @@ class DidiTracklet(object):
                 lidar_int[points_per_ring * (i-rings[0]):points_per_ring * (i+1-rings[0])] = \
                     np.vstack((_int_x, _int_y, _int_z, _int_i, i * np.ones(points_per_ring))).T
 
+            # this is only used for training, but still could pick not just the first repeated distance
+            # but the one amid all repeated points which would minimize the deinterpolation error
+            if return_lidar_deinterpolated:
+                _, u_int_dr_idx = np.unique(_int_dr, return_index=True)
+                u_int_x = np.multiply(_int_dr[u_int_dr_idx], np.cos(_int_r[u_int_dr_idx]))
+                u_int_y = np.multiply(_int_dr[u_int_dr_idx], np.sin(_int_r[u_int_dr_idx]))
+                u_int_z = _int_dh[u_int_dr_idx]
+                u_int_i = _int_i[u_int_dr_idx]
+                lidar_deint = np.concatenate((
+                    lidar_deint,
+                    np.vstack((u_int_x, u_int_y, u_int_z, u_int_i, i * np.ones(u_int_dr_idx.shape[0]))).T),
+                    axis = 0)
+
             lidar_d_i[i-rings[0]] = np.vstack((_int_dr, _int_dh, _int_i)).T
 
         ret = (lidar_d_i,)
         if return_lidar_interpolated:
             ret += (lidar_int,)
+        if return_lidar_deinterpolated:
+            ret += (lidar_deint,)
         if return_angle_at_edges:
             ret += (angle_at_edges,)
 
@@ -696,7 +718,7 @@ class DidiTracklet(object):
     #
     def top_view(self, frame, with_boxes=True, lidar_override=None, SX=None,
                  zoom_to_box=False, side_view=False, randomize=False, distance=50.,
-                 rings=None, num_points=None, points_per_ring=None):
+                 rings=None, num_points=None, points_per_ring=None, deinterpolate=False):
 
         if with_boxes and zoom_to_box:
             assert self._boxes is not None
@@ -754,7 +776,8 @@ class DidiTracklet(object):
                     rings = range(32) if rings is None else rings,
                     points_per_ring = points_per_ring,
                     clip = (0., distance),
-                    return_lidar_interpolated = True)
+                    return_lidar_interpolated = True if deinterpolate is False else False,
+                    return_lidar_deinterpolated= deinterpolate)
 
         if randomize:
             centroid = self.get_box_centroid(frame)

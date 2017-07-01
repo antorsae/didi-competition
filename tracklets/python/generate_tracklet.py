@@ -77,10 +77,12 @@ class TrackletCollection(object):
     def __init__(self):
         self.tracklets = []
 
-    def write_xml(self, filename):
+    def write_xml(self, filename, comment=None):
         tab_level = 0
         with open(filename, mode='w') as f:
             writeln(f, r'<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>', tab_level)
+            if comment is not None:
+                writeln(f, '<!-- Generated with %s -->' % comment, tab_level)
             writeln(f, r'<!DOCTYPE boost_serialization>', tab_level)
             writeln(f, r'<boost_serialization signature="serialization::archive" version="9">', tab_level)
             writeln(f, r'<tracklets class_id="0" tracking_level="0" version="0">', tab_level)

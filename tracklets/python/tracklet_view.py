@@ -61,10 +61,12 @@ if __name__ == '__main__':
                                 help='Distance ')
             parser.add_argument('-p', '--points-per-ring', default=None, type=int, action='store',
                                 help='If specified, points per ring for linear interpolation')
-            parser.add_argument('-r', '--rings', nargs='+', type=int, action='store', help='Only include rings, e.g. -or 10 11 12 13')
+            parser.add_argument('-r', '--rings', nargs='+', type=int, action='store', help='Only include ring range, e.g. -r 12 28')
             parser.add_argument('-sw', '--scale-w', default=1., type=float, action='store', help='Scale bounding box width ')
             parser.add_argument('-sl', '--scale-l', default=1., type=float, action='store', help='Scale bounding box width ')
             parser.add_argument('-sh', '--scale-h', default=1., type=float, action='store', help='Scale bounding box width ')
+            parser.add_argument('-di', '--deinterpolate', action='store_true', help='Deinterpolate interpolated lidar (needs -p)')
+
 
             args = parser.parse_args()
 
@@ -96,7 +98,8 @@ if __name__ == '__main__':
                                            distance = args.distance,
                                            rings = range(args.rings[0], args.rings[1]) if args.rings else None,
                                            num_points = args.num_points,
-                                           points_per_ring = args.points_per_ring)
+                                           points_per_ring = args.points_per_ring,
+                                           deinterpolate = args.deinterpolate)
 
                     #obs_points = tracklet.get_points_in_box(frame, ignore_z=False)
                     #print('frame ' + str(frame), obs_points)
