@@ -424,6 +424,7 @@ class DidiTracklet(object):
     def get_lidar_rings(self, frame, rings, points_per_ring, clip=None, clip_h=None,
                         rotate=0., flipX = False, flipY=False, jitter=False,
                         return_lidar_interpolated=False, return_lidar_deinterpolated=False,
+                        lidar_deinterpolate_random = False,
                         return_angle_at_edges = False):
         if frame not in self.lidars:
             self._read_lidar(frame)
@@ -433,6 +434,7 @@ class DidiTracklet(object):
                                                rotate=rotate, flipX = flipX, flipY=flipY, jitter=jitter,
                                                return_lidar_interpolated = return_lidar_interpolated,
                                                return_lidar_deinterpolated = return_lidar_deinterpolated,
+                                               lidar_deinterpolate_random = lidar_deinterpolate_random,
                                                return_angle_at_edges = return_angle_at_edges,
                                                )
 
@@ -443,7 +445,9 @@ class DidiTracklet(object):
                            rotate=0., flipX = False, flipY=False, jitter=False,
                            return_lidar_interpolated=False,
                            return_lidar_deinterpolated=False,
-                           return_angle_at_edges=False):
+                           lidar_deinterpolate_random=False,
+                           return_angle_at_edges=False,
+                           ):
         if rotate != 0.:
             lidar = point_utils.rotZ(lidar, rotate)
 
@@ -455,7 +459,7 @@ class DidiTracklet(object):
         lidar_d_i = np.empty((len(rings), points_per_ring,  3), dtype=np.float32)
 
         if return_angle_at_edges:
-            angle_at_edges = np.zeros((len(rings), 2), dtype=np.float32)
+            angle_at_edges = np.zeros((len(rings), 3), dtype=np.float32)
 
         if return_lidar_interpolated:
             lidar_int   = np.empty((len(rings) * points_per_ring, 5), dtype=np.float32)
@@ -497,10 +501,24 @@ class DidiTracklet(object):
                 lidar_int[points_per_ring * (i-rings[0]):points_per_ring * (i+1-rings[0])] = \
                     np.vstack((_int_x, _int_y, _int_z, _int_i, i * np.ones(points_per_ring))).T
 
-            # this is only used for training, but still could pick not just the first repeated distance
-            # but the one amid all repeated points which would minimize the deinterpolation error
             if return_lidar_deinterpolated:
-                _, u_int_dr_idx = np.unique(_int_dr, return_index=True)
+                _, u_int_dr_idx_f = np.unique(_int_dr,       return_index=True)
+                _, u_int_dr_idx_l = np.unique(_int_dr[::-1], return_index=True)
+                if lidar_deinterpolate_random:
+                    # picks a random point between the first and the last
+                    # all repetitions need to happen contiguously
+                    u_int_dr_idx_range = _int_dr.shape[0] - 1 - u_int_dr_idx_l - u_int_dr_idx_f
+                    u_int_dr_idx = u_int_dr_idx_f + np.remainder(
+                        np.random.randint(np.amax(u_int_dr_idx_range) + 1, size=u_int_dr_idx_f.shape),
+                        u_int_dr_idx_range + 1)
+
+                    if np.any(u_int_dr_idx > (_int_dr.shape[0] - 1 - u_int_dr_idx_l)):
+                        print(u_int_dr_idx_f, u_int_dr_idx_l, u_int_dr_idx_range)
+                        assert False
+                else:
+                    # picks the mid point if there are repeated points.
+                    # all repetitions need to happen contiguously
+                    u_int_dr_idx = (_int_dr.shape[0] - 1 - u_int_dr_idx_l + u_int_dr_idx_f) // 2
                 u_int_x = np.multiply(_int_dr[u_int_dr_idx], np.cos(_int_r[u_int_dr_idx]))
                 u_int_y = np.multiply(_int_dr[u_int_dr_idx], np.sin(_int_r[u_int_dr_idx]))
                 u_int_z = _int_dh[u_int_dr_idx]
@@ -518,7 +536,12 @@ class DidiTracklet(object):
         if return_lidar_deinterpolated:
             ret += (lidar_deint,)
         if return_angle_at_edges:
-            ret += (angle_at_edges,)
+            min_diff_idx = np.argmin(
+                np.absolute(
+                    np.arctan2(
+                        np.sin(angle_at_edges[:,0]-angle_at_edges[:,1]),
+                        np.cos(angle_at_edges[:,0]-angle_at_edges[:,1]))))
+            ret += (angle_at_edges[min_diff_idx,0],)
 
         if len(ret) == 1:
             return ret[0]
@@ -887,26 +910,34 @@ class DidiTracklet(object):
         return lidar_in_2d_box
 
     # returns lidar points that are inside a given box, or just the indexes
-    def _lidar_in_box(self, frame, box, ignore_z=False):
+    def _lidar_in_box(self, frame, box, ignore_z=False, jitter_centroid = (0.,0.,0.), scale_xy=1., dropout=0.):
         if frame not in self.lidars:
             self._read_lidar(frame)
             assert frame in self.lidars
 
         lidar = self.lidars[frame]
-        return DidiTracklet.get_lidar_in_box(lidar, box, ignore_z=ignore_z)
+        return DidiTracklet.get_lidar_in_box(lidar, box, ignore_z=ignore_z,
+                                             jitter_centroid = jitter_centroid, scale_xy=scale_xy, dropout=dropout)
 
     # returns lidar points that are inside a given box, or just the indexes
     @staticmethod
-    def get_lidar_in_box(lidar, box, return_idx_only=False, ignore_z=False):
+    def get_lidar_in_box(lidar, box, return_idx_only=False, ignore_z=False, jitter_centroid=(0.,0.,0.), scale_xy=0., dropout=0.):
 
         p = lidar[:, :3]
+
+        _jitter_centroid = (np.random.rand(3) - 0.5 ) * jitter_centroid
+        _box = box + np.array(_jitter_centroid).reshape((3,1))
+
+        if scale_xy != 0.:
+            _centroid = np.mean(_box[:2,:], axis=1).reshape((2,1))
+            _box[:2,:] = ((np.random.rand() - 0.5 ) * scale_xy + 1. ) * (_box[:2,:] - _centroid) + _centroid
 
         # determine if points in M are inside a rectangle defined by AB AD (AB and AD are orthogonal)
         # tdlr: they are iff (0<AM⋅AB<AB⋅AB)∧(0<AM⋅AD<AD⋅AD)
         # http://math.stackexchange.com/questions/190111/how-to-check-if-a-point-is-inside-a-rectangle
-        a = np.array([box[0, 0], box[1, 0]])
-        b = np.array([box[0, 1], box[1, 1]])
-        d = np.array([box[0, 3], box[1, 3]])
+        a = np.array([_box[0, 0], _box[1, 0]])
+        b = np.array([_box[0, 1], _box[1, 1]])
+        d = np.array([_box[0, 3], _box[1, 3]])
         ab = b - a
         ad = d - a
         abab = np.dot(ab, ab)
@@ -919,15 +950,22 @@ class DidiTracklet(object):
             in_box_idx = np.where(
                 (abab >= amab) & (amab >= 0.) & (amad >= 0.) & (adad >= amad))
         else:
-            min_z = box[2, 0]
-            max_z = box[2, 4]
+            min_z = _box[2, 0]
+            max_z = _box[2, 4]
             in_box_idx = np.where(
                 (abab >= amab) & (amab >= 0.) & (amad >= 0.) & (adad >= amad) & (p[:, 2] >= min_z) & (p[:, 2] <= max_z))
+
+        in_box_idx = in_box_idx[0]
+
+        if (dropout != 0.) and in_box_idx.shape[0] > 2:
+            in_box_idx = np.random.choice(in_box_idx, size=int(in_box_idx.shape[0]*(1. - np.random.rand() * dropout)), replace=False)
 
         if return_idx_only:
             return in_box_idx
 
-        points_in_box = np.squeeze(lidar[in_box_idx, :], axis=0)
+        points_in_box = lidar[in_box_idx, :]
+
+        #points_in_box = np.squeeze(lidar[in_box_idx, :], axis=0)
         return points_in_box
 
     # given array of points with shape (N_points) and projection matrix w/ shape (3,4)
