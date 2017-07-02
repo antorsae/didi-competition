@@ -536,11 +536,11 @@ class DidiTracklet(object):
         if return_lidar_deinterpolated:
             ret += (lidar_deint,)
         if return_angle_at_edges:
-            min_diff_idx = np.argmin(
-                np.absolute(
-                    np.arctan2(
-                        np.sin(angle_at_edges[:,0]-angle_at_edges[:,1]),
-                        np.cos(angle_at_edges[:,0]-angle_at_edges[:,1]))))
+            angle_diffs = np.absolute(
+                np.arctan2(
+                    np.sin(angle_at_edges[:, 0] - angle_at_edges[:, 1]),
+                    np.cos(angle_at_edges[:, 0] - angle_at_edges[:, 1])))
+            min_diff_idx = np.argmin(angle_diffs[angle_at_edges[:,2] > 0])
             ret += (angle_at_edges[min_diff_idx,0],)
 
         if len(ret) == 1:
@@ -794,13 +794,14 @@ class DidiTracklet(object):
             if num_points is not None:
                 lidar = DidiTracklet.resample_lidar(lidar, num_points)
             if points_per_ring is not None:
-                _, lidar = DidiTracklet.filter_lidar_rings(
+                _, lidar, angle_at_edge = DidiTracklet.filter_lidar_rings(
                     lidar,
                     rings = range(32) if rings is None else rings,
                     points_per_ring = points_per_ring,
                     clip = (0., distance),
                     return_lidar_interpolated = True if deinterpolate is False else False,
-                    return_lidar_deinterpolated= deinterpolate)
+                    return_lidar_deinterpolated= deinterpolate,
+                    return_angle_at_edges=True)
 
         if randomize:
             centroid = self.get_box_centroid(frame)
